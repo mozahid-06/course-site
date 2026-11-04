@@ -1,4 +1,5 @@
 import { handleFiles } from './files.js';
+import { YOUTUBE_LESSONS } from './youtube.js';
 
 const enc = new TextEncoder();
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -139,6 +140,15 @@ let cache = { at: 0, data: null };
 // waiting out the 60 s window below.
 export function invalidateCourse() { cache = { at: 0, data: null }; }
 const NUM = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+// YouTube lessons (worker/youtube.js) need no upload: a path plus any YouTube link
+// (watch, youtu.be, embed, shorts, live) or a bare video id. Returns the video id.
+function ytId(link) {
+  const s = String(link || '').trim();
+  if (!s) return null;
+  const m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{6,})/.exec(s);
+  if (m) return m[1];
+  return /^[A-Za-z0-9_-]{6,}$/.test(s) ? s : null;
+}
 async function listCourse(env) {
   if (cache.data && Date.now() - cache.at < 60000) return cache.data;
   const keys = []; let cursor;
@@ -166,6 +176,24 @@ async function listCourse(env) {
     const secs = courses.get(courseName);
     if (!secs.has(sectionName)) secs.set(sectionName, []);
     secs.get(sectionName).push({ id: key, title, kind: pdf ? 'pdf' : 'video' });
+  }
+
+  // Merge YouTube lessons from worker/youtube.js. The key is a path like an R2 key
+  // (<Course>/<Folder>/<Name>); the first segment is the course. A course that has only
+  // YouTube lessons is created here, so it still appears and can be granted to students.
+  for (const [rawPath, link] of Object.entries(YOUTUBE_LESSONS)) {
+    const parts = String(rawPath).split('/').map((s) => s.trim()).filter(Boolean);
+    if (parts.length < 2) continue; // needs a course and a lesson name
+    const videoId = ytId(link);
+    if (!videoId) continue; // ignore entries with no usable link
+    const id = parts.join('/');
+    const courseName = parts[0];
+    if (!courses.has(courseName)) courses.set(courseName, new Map());
+    const secs = courses.get(courseName);
+    if ([...secs.values()].some((list) => list.some((l) => l.id === id))) continue; // a real file wins a clash
+    const sectionName = parts.slice(1, -1).join(' / ');
+    if (!secs.has(sectionName)) secs.set(sectionName, []);
+    secs.get(sectionName).push({ id, title: parts[parts.length - 1], kind: 'youtube', yt: videoId });
   }
 
   const data = [...courses].sort((a, b) => NUM.compare(a[0], b[0])).map(([courseName, secs]) => {

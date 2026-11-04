@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-export interface Lesson { id: string; title: string; kind: 'video' | 'pdf'; done: boolean }
+export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean; yt?: string }
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }

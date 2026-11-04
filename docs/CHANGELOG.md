@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Added (YouTube lessons)
+- Play a YouTube video as a lesson, with no upload: add `"<Course>/<Folder>/<Name>": "<YouTube link>"` to `worker/youtube.js` (`YOUTUBE_LESSONS`). The link may be a watch/`youtu.be`/`embed`/`shorts`/`live` URL or a bare video id.
+- `listCourse` merges those entries into the bucket listing; a YouTube-only course is created automatically and can be granted to students. A real file with the same key wins; a bad link is skipped before anything is created.
+- YouTube lessons use R2-key-shaped ids, so progress, discussion, private notes, resources and enrollments all work unchanged.
+- New `src/app/yt-player.ts` (`<app-yt-player>`): a privacy-friendly `youtube.com/embed` iframe with the moving email watermark; `course.ts` and the header search show a YouTube icon.
+- `public/_headers` allows `youtube.com` / `youtube-nocookie.com` in the report-only CSP `frame-src`; `styles.css` sizes the iframe like the video.
+
 ### Changed (Angular 22 upgrade)
 - Upgraded Angular 21 → 22 and TypeScript 5.9 → 6.0. Angular 22 makes `OnPush` the default change detection strategy, so the `ng update` migration added `ChangeDetectionStrategy.Eager` to every existing component to keep behaviour unchanged. New components can use the OnPush default.
 - Pinned the toolchain so local, CI and Workers Builds agree: `.nvmrc` (Node 24) and `engines.node`.

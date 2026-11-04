@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
+import { YtPlayer } from './yt-player';
 import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
@@ -12,7 +13,7 @@ type View =
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, PdfViewer, LessonPanel],
+  imports: [Player, YtPlayer, PdfViewer, LessonPanel],
   template: `
     <div class="layout">
 
@@ -45,6 +46,8 @@ type View =
                       <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
                     } @else if (item.kind === 'pdf') {
                       <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+                    } @else if (item.kind === 'youtube') {
+                      <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
                     } @else {
                       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
                     }
@@ -78,6 +81,9 @@ type View =
             <div class="player-body">
               @if (l.kind === 'pdf') {
                 <app-pdf-viewer [key]="l.id" />
+              } @else if (l.kind === 'youtube') {
+                <app-yt-player [yt]="l.yt || ''" />
+                <app-lesson-panel [lesson]="l" />
               } @else {
                 <app-player [key]="l.id" (ended)="finish(l)" />
                 <app-lesson-panel [lesson]="l" />
@@ -152,7 +158,7 @@ export class Course {
 
     // Collect all lessons and derive folders/files at current depth
     const folders = new Set<string>();
-    const files: { id: string; name: string; kind: 'video' | 'pdf'; done: boolean }[] = [];
+    const files: { id: string; name: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean }[] = [];
 
     for (const section of course.sections) {
       // section.title is the sub-path joined by ' / ', e.g. null, 'Section', 'Section / Sub'

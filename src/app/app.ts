@@ -8,7 +8,7 @@ import { LessonSearch } from './lesson-search';
 interface LessonHit {
   id: string;
   title: string;
-  kind: 'video' | 'pdf';
+  kind: 'video' | 'pdf' | 'youtube';
   course: string;
   section: string;
   path: string[];
@@ -73,6 +73,8 @@ interface LessonHit {
                       <span class="hr-kind" aria-hidden="true">
                         @if (l.kind === 'pdf') {
                           <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+                        } @else if (l.kind === 'youtube') {
+                          <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
                         } @else {
                           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
                         }

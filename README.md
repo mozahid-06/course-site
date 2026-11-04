@@ -2,7 +2,7 @@
 
 A private video and PDF course site on Cloudflare. Students sign in and watch lessons; the course layout is read straight from your R2 bucket's folders. Admins manage users from an in-app Admin panel.
 
-**Stack:** Angular 22 (standalone components, signals), Cloudflare Worker API, R2 (videos, PDFs), D1 (users, progress, course access, private PDF notes). `hls.js` and `ngx-extended-pdf-viewer` load only when a lesson needs them.
+**Stack:** Angular 22 (standalone components, signals), Cloudflare Worker API, R2 (videos, PDFs), D1 (users, progress, course access, private PDF notes). `hls.js` and `ngx-extended-pdf-viewer` load only when a lesson needs them. Lessons can also be **YouTube videos** (an iframe, nothing uploaded) — see below.
 
 ## Project structure
 
@@ -12,6 +12,7 @@ course-site/
   package.json           Angular + wrangler; `npm run deploy` builds then deploys
   worker/index.js        API, auth, admin, course listing, media streaming (the Worker)
   worker/files.js        File manager API: listing, folders, move/rename, delete, upload handshake
+  worker/youtube.js      YouTube lessons: a lesson path -> YouTube link map (edited by hand, no upload)
   worker/s3.js           R2 S3 signing (aws4fetch): server calls and presigned browser PUTs
   src/
     styles.css           All styling: tokens, light/dark, desktop + phone layouts
@@ -22,6 +23,7 @@ course-site/
       login.ts           Sign-in form + Google button
       course.ts          Course cards (home), outline sidebar (folder tree + search), folder browser, lesson view, Mark as complete
       player.ts          Video player with moving email watermark
+      yt-player.ts       YouTube lesson: iframe player with the same moving email watermark
       pdf-viewer.ts      PDF reader with private notes, hide/reset and full-window mode (download and print stay off)
       admin.ts           Admin panel: list/add/reset password/promote/delete users, give courses
       admin-files.ts     File manager view: folder tree, rename/move/delete, new folder, uploads
@@ -49,6 +51,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
 - Names sort naturally, so prefix with `01`, `02`. New uploads appear within about a minute (the listing is cached 60 s per Worker instance).
 - Progress, comments, notes and resources are stored by object key. Rename or move through **Admin panel → Files** and they follow; renaming with rclone or the dashboard does not.
+- **YouTube lessons** are added on top of the bucket listing from `worker/youtube.js` (below), so a lesson can exist without a file in R2.
 
 ## Accounts and the Admin panel
 
@@ -89,6 +92,30 @@ Everything the owner needs for day-to-day content work, without `rclone`:
 - **New folder:** a folder at the top level is a course. An empty folder is held by a hidden zero-byte `.keep`.
 
 Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, optional `R2_BUCKET`) and a bucket CORS rule that exposes `ETag`; both are covered under Deploy. An R2 lifecycle rule on `course-sourse` aborts incomplete multipart uploads after 7 days, so an abandoned upload does not keep paying for parts.
+
+## YouTube lessons (no upload)
+
+A lesson can be a YouTube video instead of a file. This costs nothing and needs no upload, which is the point for lessons already on YouTube.
+
+Edit **`worker/youtube.js`** and add one line per lesson:
+
+```js
+export const YOUTUBE_LESSONS = {
+  // "<Course>/<Folder>/<Name>": "<YouTube link>"
+  "Physics/Week 1/Welcome": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "Physics/Intro to forces": "https://youtu.be/dQw4w9WgXcQ",
+  "Maths/15 - Limits": "dQw4w9WgXcQ",
+};
+```
+
+- The key uses the same shape as an R2 key. The **first** segment is the course, the middle segments are folders (shown joined with ` / `), and the **last** segment is the lesson name. A lesson directly in a course root is just `<Course>/<Name>`.
+- The value can be any usual YouTube link (watch, `youtu.be`, `/embed`, `/shorts`, `/live`) or just the video id.
+- A course that only has YouTube lessons is created automatically, so it shows on the home screen and can be granted to students like any other course.
+- If an entry names a file that already exists in R2, the real file wins and the entry is ignored. Entries with an unusable link are skipped (they never create an empty course or section).
+- YouTube lessons behave like video lessons: **Mark as complete**, the discussion, private notes and resources all work.
+- Changing the file takes effect after the next **deploy** (or an `npm run api` restart locally); the course listing is also cached about 60 s per Worker instance.
+
+The player is a plain iframe from `youtube.com/embed` (privacy-friendly, `rel=0` so the end screen stays on the video), with the student's email watermark moving over it, and `public/_headers` allows `youtube.com` / `youtube-nocookie.com` in `frame-src`.
 
 ## Prepare and upload content
 
@@ -175,7 +202,7 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 | `GET /api/config` | public | `{googleClientId}` (empty when not configured) |
 | `POST /api/login/google` | public | `{credential}` Google ID token; invite-only |
 | `GET /api/me` | signed in | Current user (`id, email, is_admin`) |
-| `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket |
+| `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket plus YouTube lessons (`kind` is `video`, `pdf` or `youtube`; `youtube` also has `yt`, the video id) |
 | `GET /api/media/<key>` | signed in | Playlist, segment, video or PDF (range requests supported) |
 | `POST /api/progress` | signed in | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded pdf key>` | signed in | The student's own notes for one PDF (`PUT {data: []}`); `403` for a course they do not have |

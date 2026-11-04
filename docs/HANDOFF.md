@@ -1,6 +1,6 @@
 # Handoff: how this project was built and where it stands
 
-For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass.
+For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), the YouTube lessons feature, the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass.
 
 ## 1. Goal and requirements
 
@@ -18,7 +18,9 @@ A private video course site for a small cohort (about 6 students, growing to a f
 
 | Decision | Reason |
 | --- | --- |
-| Not YouTube unlisted | The video ID is visible in DevTools and the link is permanent. |
+| Not YouTube unlisted (as the storage) | The video ID is visible in DevTools and the link is permanent, so it cannot protect paid content. |
+| YouTube lessons are opt-in, from `worker/youtube.js` | Sometimes a lesson already lives on YouTube and uploading it again is wasted work. A hand-edited `"<Course>/<Folder>/<Name>": "<link>"` map adds such lessons with no upload, no R2 cost and no schema change. It is an addition to the bucket listing, not a replacement for it. |
+| YouTube lesson keys are R2-key shaped | So progress, comments, notes, resources and enrollments all key off the same `lesson` string as a real file. The course is the first segment, so a YouTube-only course is a normal course and can be granted to students. A real file with the same key wins the clash. |
 | Cloudflare R2 for storage | Free egress, about $0.015/GB-month. |
 | Worker serves media | Checks a login before any byte is sent; supports range requests so seeking works. |
 | HLS supported, MP4 also served | The Worker lists and serves both. HLS (`tools/make-hls.sh`) avoids a single downloadable file; plain MP4 is simpler to upload. The old `ALLOW_MP4` switch was removed from the code, so MP4 is always served. |
@@ -61,12 +63,14 @@ Cloudflare Worker  (worker/index.js)
 | --- | --- |
 | `worker/index.js` | Backend entry: auth, admin seeding and endpoints, course listing, media streaming, progress; dispatches `/api/admin/files*` to `files.js` |
 | `worker/files.js` | File manager API: listing, create folder, move/rename, delete, and the upload handshake (start/part/url/complete/abort/parts) |
+| `worker/youtube.js` | YouTube lessons: `YOUTUBE_LESSONS`, a lesson-path → YouTube-link map, edited by hand (no upload). Merged into `listCourse`. |
 | `worker/s3.js` | R2 S3 signing with `aws4fetch`: `r2Config`, server calls (`s3Fetch`) and presigned browser PUTs (`presign`) |
 | `src/app/api.ts` | `Api` service: fetch wrapper (GET/POST/DELETE) and app state signals (`me`, `courses`); user-admin calls |
 | `src/app/app.ts` | Root: header (logo, Admin panel toggle, Sign out), switches course/admin views |
 | `src/app/login.ts` | Sign-in form |
 | `src/app/course.ts` | Course cards (home), sidebar folder tree with search, folder browser with breadcrumb, lesson view, Mark as complete |
 | `src/app/player.ts` | Video element + moving email watermark (native controls) |
+| `src/app/yt-player.ts` | YouTube lesson: `<iframe>` embed + the same moving email watermark |
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off |
 | `src/app/admin.ts` | Admin panel UI (users and course checkboxes) with a Files/Users toggle |
 | `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop |
@@ -102,7 +106,7 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `GET /api/config` | none | `{googleClientId}` |
 | `POST /api/login/google` | none | `{credential}`; verifies the Google ID token (RS256 against Google's JWKS, `iss`, `aud`, `exp`, `email_verified`), matches `google_sub` then invited email, links on first login |
 | `GET /api/me` | session | `{id, email, is_admin}` |
-| `GET /api/course` | session | `[{title, sections:[{title, lessons:[{id, title, kind:'video'|'pdf', done}]}]}]`; `section.title` is the sub-path joined by `" / "` or `null` |
+| `GET /api/course` | session | `[{title, sections:[{title, lessons:[{id, title, kind:'video'|'pdf'|'youtube', done}]}]}]`; `youtube` lessons also carry `yt` (the video id); `section.title` is the sub-path joined by `" / "` or `null`. Built from the bucket listing plus `worker/youtube.js`. |
 | `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded key>` | session | Own notes for one `.pdf`; every query is scoped to the signed-in user; `403` if the course is not enrolled |
@@ -134,6 +138,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 3. Course = first path segment. Section = remaining directories joined by `" / "` (empty = course root).
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
 5. Sort with a numeric-aware collator.
+6. Merge `YOUTUBE_LESSONS` from `worker/youtube.js`. Each key is split on `/`; the first segment is the course (created if missing, so a YouTube-only course appears), the middle segments form the section title (joined with `" / "`), and the last segment is the lesson name. `ytId()` accepts a watch/`youtu.be`/`embed`/`shorts`/`live` link or a bare id; an unusable link is skipped before anything is created, and a key that collides with a real file is ignored. The merged lesson is `{id, title, kind:'youtube', yt}` where `id` is the full path, so progress/comments/notes/resources/enrollments work unchanged.
 
 `/api/course` and `/api/media/*` then filter by `enrollments` (`myCourses`; admins get everything). The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` for both the main browser (current level) and the sidebar outline (`rows` computed: open folders only, flat list while searching).
 
@@ -193,10 +198,25 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 
 Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35` discussion/notes/resources regression checks); and a live pass against the deployed Worker with a throwaway admin, student and course: `44/44` API checks, then Chromium at 1200/393/320 px covering create course/section, single-PUT and multipart uploads, drag-and-drop, duplicate-name **Replace**, rename/move (including Unicode and `&`/parentheses), Escape closing a dialog, delete file/folder/course, long-name truncation and no horizontal overflow. Real uploads were confirmed with `rclone size` (900 KB by single PUT; 20 MiB and 60 MiB by multipart). A 60 MiB upload reloaded after 6 of 8 parts resumed at 80% and completed at exactly 60 MiB. Cancelling during the start call, mid-parts, during a single PUT, and on a paused row after a reload left no object and no multipart upload. Test objects, users and enrollments were removed afterwards.
 
+## 4d. YouTube lessons (added later)
+
+- `worker/youtube.js` holds `YOUTUBE_LESSONS`, a hand-edited `"<Course>/<Folder>/<Name>": "<link>"` map. `listCourse` merges it into the bucket listing after the R2 walk. A bare id, a watch link, `youtu.be`, `/embed`, `/shorts` and `/live` are all accepted by `ytId()`.
+- The key is R2-key shaped on purpose: `id` is the full path, so `watched`, `comments`, `video_notes`, `pdf_notes`, `resources` and `enrollments` treat a YouTube lesson exactly like a file lesson. The first segment is the course, so a YouTube-only course appears in the admin Courses list and can be granted.
+- Frontend: `course.ts` renders `<app-yt-player>` for `kind === 'youtube'` (instead of `<app-player>`), and both the file list and the header search show a distinct YouTube icon. `src/app/yt-player.ts` is a plain `<iframe src="https://www.youtube.com/embed/<id>?rel=0">` with the shared moving email watermark. `public/_headers` adds `youtube.com` and `youtube-nocookie.com` to the report-only CSP `frame-src`.
+- A YouTube lesson has no server-side "ended" event (the iframe is opaque), so completion is the lesson panel's **Mark as complete** button only; the video player's auto-finish-on-ended does not apply.
+
+Verified this session (local Worker, throwaway entries):
+- `node --check worker/index.js worker/youtube.js` pass; `npm run typecheck` and `npm run build` exit 0; the built bundle contains the embed URL.
+- `wrangler dev` + curl: login, then `GET /api/course` returned `Test Course` with a root section (`Intro to forces`, `yt=abcdefghijk` from `youtu.be`) and `Week 1` (`Welcome`, `yt=dQw4w9WgXcQ` from `watch?v=`), plus a YouTube-only course `YouTube Only` (`First`, `yt=M7lc1UVf-VE` from a bare id). An entry with a bad link (`Bad Link`) was skipped with no empty section or empty course.
+- `POST /api/progress` on `YouTube Only/First` returned `ok`, `watching` marked it done on the next `GET /api/course`, and `/api/lesson/<id>/comments`, `/notes` and `/resources` all resolved (access check passed).
+
+Not verified: the iframe rendering in a real browser and on the live Worker — the CSP is report-only, so check the console after deploy.
+
 ## 5. Known limitations and risks
 
 1. A signed-in technical student can still capture or fetch media with their cookie (`yt-dlp`, or the file URL for plain MP4/PDF). No DRM.
 2. The video watermark is a DOM element, removable with DevTools, and absent in native fullscreen. PDFs have no watermark.
+2a. YouTube lessons get **no** download protection: the iframe cannot stop saving the video, the video id is visible in DevTools, and the video is reachable on YouTube itself. Use them only for content you are happy to publish on YouTube; the iframe does not enforce course access once the id is known. (The page still requires a session to list the lesson.)
 3. HLS segments are not encrypted; protection is the session cookie only.
 4. Login lockout exists, but there is no Cloudflare WAF/bot protection configured; see `docs/SECURITY.md`.
 5. No password change by the student, no self-service reset, no "disable" (only delete).
@@ -221,7 +241,7 @@ Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35`
 7. Multi-bitrate HLS and AES-128 segment encryption with an authenticated key endpoint.
 8. Generate a `manifest.json` at upload time so the Worker does not list the bucket (or cache in KV).
 9. Port the Worker to TypeScript, split into modules, add Vitest tests (`@cloudflare/vitest-pool-workers`).
-10. GitHub Actions for build and type checks on pull requests.
+10. ~~GitHub Actions for build and type checks~~ **done** (`.github/workflows/ci.yml`: `npm ci`, `typecheck`, `build` on PRs and pushes to `main`).
 11. Stateful sessions (a `sessions` table) for instant revocation and device lists.
 12. A paid DRM or per-user watermarking service if leaks become a real problem.
 
@@ -234,6 +254,7 @@ Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35`
 - Keep the Worker `/api` contract and the Angular `Api` service in sync; change both together.
 - Never commit secrets, `.dev.vars`, `node_modules`, `dist`, or media files.
 - Upload media with `rclone`, never through git.
+- YouTube lesson keys in `worker/youtube.js` must keep the R2 key shape (`<Course>/<Folder>/<Name>`); the first segment is the course, so it must match the course folder name to join an existing course.
 
 ## 8. Run and test
 
@@ -261,6 +282,8 @@ curl -b jar -H "Range: bytes=0-99" "localhost:8787/api/media/Demo/Notes.pdf" -i
 ## 9. Uploading course content to R2
 
 Use the in-app **Admin panel → Files** for ordinary work: pick or drag files onto a folder, and rename, move, delete or create folders there. It keeps student data attached and needs no `rclone`. Use `rclone` for bulk imports.
+
+If a lesson already lives on YouTube, add it to `worker/youtube.js` instead of uploading (see the README's "YouTube lessons" section and section 4d above). No R2 object, no upload, no cost.
 
 Bucket: `course-sourse`. See the README for the folder mapping, the `rclone` setup and the MP4 `-movflags +faststart` fix (required for plain MP4 so playback starts without downloading the whole file).
 
