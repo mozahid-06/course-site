@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Api, FileListing } from './api';
 import { UploadJob, Uploader } from './upload';
 
@@ -19,6 +19,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 @Component({
   selector: 'app-admin-files',
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <section
       class="files"

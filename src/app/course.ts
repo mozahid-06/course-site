@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
@@ -11,6 +11,7 @@ type View =
 
 @Component({
   selector: 'app-course',
+  changeDetection: ChangeDetectionStrategy.Eager,
   imports: [Player, PdfViewer, LessonPanel],
   template: `
     <div class="layout">

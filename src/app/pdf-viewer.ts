@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
 
@@ -27,6 +27,7 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
 
 @Component({
   selector: 'app-pdf-viewer',
+  changeDetection: ChangeDetectionStrategy.Eager,
   imports: [NgxExtendedPdfViewerModule],
   host: { '[class.expanded]': 'expanded()' },
   template: `

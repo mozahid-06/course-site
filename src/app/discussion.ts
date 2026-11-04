@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { Api, Comment, Lesson } from './api';
 
 /**
@@ -7,6 +7,7 @@ import { Api, Comment, Lesson } from './api';
  */
 @Component({
   selector: 'app-discussion',
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <div class="dc">
       <form class="dc-compose" (submit)="$event.preventDefault(); post()">

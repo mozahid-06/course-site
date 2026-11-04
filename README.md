@@ -2,7 +2,7 @@
 
 A private video and PDF course site on Cloudflare. Students sign in and watch lessons; the course layout is read straight from your R2 bucket's folders. Admins manage users from an in-app Admin panel.
 
-**Stack:** Angular 21 (standalone components, signals), Cloudflare Worker API, R2 (videos, PDFs), D1 (users, progress, course access, private PDF notes). `hls.js` and `ngx-extended-pdf-viewer` load only when a lesson needs them.
+**Stack:** Angular 22 (standalone components, signals), Cloudflare Worker API, R2 (videos, PDFs), D1 (users, progress, course access, private PDF notes). `hls.js` and `ngx-extended-pdf-viewer` load only when a lesson needs them.
 
 ## Project structure
 
@@ -114,7 +114,7 @@ Option B, HLS (harder to save as a single file): `./tools/make-hls.sh videos hls
 
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
 2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (Angular build, then `wrangler deploy`). The Worker name must be `course-site`.
-3. If the build complains about Node, add a build variable `NODE_VERSION` = `22` (Angular 21 needs Node 20.19+ or 22.12+).
+3. Workers Builds defaults to Node 24; this repo pins Node `24` in `.nvmrc` and `engines` (Angular 22 needs Node 22.22.3+ or 24.15+). Only set a `NODE_VERSION` build variable if you need to override the default.
 4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. For in-app uploads add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `course-sourse`) and optionally `R2_BUCKET`. Redeploy so the Worker sees them, and add the bucket CORS rule listed in `docs/SECURITY.md` (the browser uploads directly to R2).
 5. Open the site and sign in as the Owner with **Continue with Google** (or `ADMIN_EMAIL` / `ADMIN_PASSWORD` if you set the password), then use **Admin panel** to add students.
 

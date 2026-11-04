@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal, OnInit } from '@angular/core';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
 
@@ -30,6 +30,7 @@ const MODES: { key: CourseMode; label: string }[] = [
 
 @Component({
   selector: 'app-admin',
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <main class="admin" (document:keydown.escape)="onEsc()">
       <!-- Header -->

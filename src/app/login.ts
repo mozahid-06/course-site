@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, AfterViewInit, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from './api';
 
@@ -18,6 +18,7 @@ function loadGsi(): Promise<void> {
 
 @Component({
   selector: 'app-login',
+  changeDetection: ChangeDetectionStrategy.Eager,
   imports: [FormsModule],
   template: `
     <form class="login" (ngSubmit)="submit()">

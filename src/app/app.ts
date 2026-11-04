@@ -1,4 +1,4 @@
-import { Component, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
 import { Api, CourseData } from './api';
 import { Login } from './login';
 import { Course } from './course';
@@ -16,6 +16,7 @@ interface LessonHit {
 
 @Component({
   selector: 'app-root',
+  changeDetection: ChangeDetectionStrategy.Eager,
   imports: [Login, Course, Admin],
   host: {
     '(document:click)': 'onDocClick($event)',

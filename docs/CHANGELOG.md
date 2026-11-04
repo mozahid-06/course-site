@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+### Changed (Angular 22 upgrade)
+- Upgraded Angular 21 → 22 and TypeScript 5.9 → 6.0. Angular 22 makes `OnPush` the default change detection strategy, so the `ng update` migration added `ChangeDetectionStrategy.Eager` to every existing component to keep behaviour unchanged. New components can use the OnPush default.
+- Pinned the toolchain so local, CI and Workers Builds agree: `.nvmrc` (Node 24) and `engines.node`.
+- Added a GitHub Actions check (`.github/workflows/ci.yml`): `npm ci`, `npm run typecheck`, `npm run build` on pull requests and pushes to `main`.
+- Added a `typecheck` script (`tsc -p tsconfig.app.json --noEmit`).
+
+### Removed (Angular 22 upgrade)
+- `@angular/router`: it was listed in `package.json` but never used, so it is now dropped.
+
 ### Added (courses, notes, theme)
 - Multi-course access: `enrollments` table, `GET /api/admin/courses`, `POST /api/admin/users/<id>/courses`, `courses` on add/bulk add, course checkboxes in the Admin panel. Existing students keep every current course on first deploy.
 - Worker checks the course on `/api/course`, `/api/media/*` and `/api/notes/*`.

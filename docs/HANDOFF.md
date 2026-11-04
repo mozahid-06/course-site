@@ -1,6 +1,6 @@
 # Handoff: how this project was built and where it stands
 
-For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass.
+For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass.
 
 ## 1. Goal and requirements
 
@@ -33,7 +33,7 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | `wrangler.toml` bindings without IDs | Cloudflare provisions the D1 database and R2 bucket on the first Git deploy. Bucket is named `course-sourse` (spelling kept on purpose). |
 | First admin from secrets | `ADMIN_EMAIL` + `ADMIN_PASSWORD` are read on every cold start; the user is created if missing and forced to admin. It replaced the old `/api/setup` + `SETUP_KEY` flow. |
 | Admin panel inside the app | Replaced the single "Add student" dialog. No router; `app.ts` toggles between `<app-course>` and `<app-admin>`. |
-| Angular 21, not 22 | Angular 22 needs a newer Node than Cloudflare's build image may have. |
+| Angular 22 (upgraded from 21) | The reason to hold at 21 (Workers Builds had an older Node) is gone: the build image now defaults to Node 24, which Angular 22 supports. Angular 22 makes `OnPush` the default change detection strategy, so the `ng update` migration added `ChangeDetectionStrategy.Eager` to every existing component to keep behaviour unchanged; new components can use the OnPush default. |
 | No router, no UI library | One screen after login; fewer dependencies. |
 | `ngx-extended-pdf-viewer` | Gives a full PDF reader. Print, download, open, rotate etc. are hidden in `pdf-viewer.ts`. |
 | Native video controls and fullscreen | A custom fullscreen button was tried (to keep the watermark visible) and removed at the owner's request. Trade-off: no watermark in native fullscreen. |
@@ -207,7 +207,6 @@ Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35`
 9. The Worker is plain JavaScript with no tests; the frontend has no tests.
 10. Changing `ADMIN_PASSWORD` after the first run does not update the stored hash.
 11. The logo font is free for personal use only.
-12. `@angular/router` is listed in `package.json` but not used.
 
 ## 6. Backlog (suggested order)
 
@@ -231,7 +230,7 @@ Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35`
 - Stay on Cloudflare Workers, R2 and D1; keep cost near zero.
 - Keep `wrangler.toml` bindings without IDs so Git deploys self-provision.
 - Keep the deploy command `npm run deploy` (Angular build, then `wrangler deploy`).
-- Keep Angular 21 unless the Cloudflare build Node version is confirmed to support a newer release.
+- Keep the Angular major current (`ng update`); Angular 22 needs Node 22.22.3+/24.15+ and TypeScript 6.0+. The Workers Builds image defaults to Node 24; `.nvmrc` pins the same for local and CI.
 - Keep the Worker `/api` contract and the Angular `Api` service in sync; change both together.
 - Never commit secrets, `.dev.vars`, `node_modules`, `dist`, or media files.
 - Upload media with `rclone`, never through git.

@@ -1,9 +1,10 @@
-import { Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { Api, Lesson, ResourceItem } from './api';
 
 /** Links an admin attached to a lesson; students only ever see the list. */
 @Component({
   selector: 'app-lesson-resources',
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <div class="lr">
       @if (isAdmin()) {

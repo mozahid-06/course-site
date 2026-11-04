@@ -1,9 +1,10 @@
-import { Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import type Hls from 'hls.js';
 import { Api } from './api';
 
 @Component({
   selector: 'app-player',
+  changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <div class="vw" #wrap>
       <video #v controls controlsList="nodownload noremoteplayback" disablePictureInPicture playsinline

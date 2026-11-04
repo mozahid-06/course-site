@@ -1,4 +1,4 @@
-import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { Api, Lesson } from './api';
 import { Discussion } from './discussion';
 import { LessonResources } from './lesson-resources';
@@ -12,6 +12,7 @@ type Tab = 'discussion' | 'notes' | 'resources';
  */
 @Component({
   selector: 'app-lesson-panel',
+  changeDetection: ChangeDetectionStrategy.Eager,
   imports: [Discussion, LessonResources],
   template: `
     <section class="lp">
