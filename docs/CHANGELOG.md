@@ -6,6 +6,9 @@
 - A second pass extends the same treatment across the site: the **lesson area** (`player`, `yt-player`, `lesson-panel` + discussion/resources), **login** and the **course shell** are lazy chunks too. Every deferred block has a layout-matched placeholder, an `@error` fallback and `aria-live`, so a slow or failed chunk shows a message rather than a blank pane.
 - Initial JS transfer drops from ~215 kB to ~66 kB. The `pdf-viewer` chunk (~126 kB) is warmed on idle; `admin` (~16 kB), `course` (~3 kB) and `login` (~1.3 kB) load with their view; the lesson chunks load when a lesson opens.
 
+### Fixed
+- **YouTube lessons showed a blank black player.** `iframe[src]` is an Angular `RESOURCE_URL` binding, and Angular 22 refuses a plain string there — `DomSanitizer.sanitize(RESOURCE_URL, …)` throws NG0904 — so the `src` was never applied. `yt-player.ts` now binds a `SafeResourceUrl` made with `DomSanitizer.bypassSecurityTrustResourceUrl`. Found in a real-browser click-through; reproduced and fixed RED→GREEN against a seeded local lesson.
+
 ### Added (YouTube CSV import)
 - Add many YouTube lessons at once: in the Files → YouTube dialog, choose a **CSV** (`name,link` per row; a header row and extra columns like a `No,Date,Title,URL` export are accepted — the link column is detected by its YouTube URL and the name is the column to its left). The dialog previews the found and skipped rows, then **Add N lessons** adds them all into the current folder and updates any name that already exists. The file never leaves the browser; new pure module `src/app/youtube-csv.ts`; no Worker change.
 

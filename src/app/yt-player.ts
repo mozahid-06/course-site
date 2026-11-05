@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { Api } from './api';
 
 /** A YouTube lesson: an iframe player with the same moving email watermark as the video player. */
@@ -21,10 +22,18 @@ import { Api } from './api';
 })
 export class YtPlayer {
   private readonly api = inject(Api);
+  private readonly sanitizer = inject(DomSanitizer);
   readonly yt = input.required<string>();
 
   protected readonly email = computed(() => this.api.me()?.email ?? '');
-  protected readonly src = computed(() => `https://www.youtube.com/embed/${this.yt()}?rel=0`);
+  /**
+   * `iframe[src]` is a RESOURCE_URL binding, and Angular refuses a plain string there
+   * (`DomSanitizer.sanitize(RESOURCE_URL, …)` throws NG0904), so the URL must be marked
+   * trusted. Without this the player renders a blank black box on every YouTube lesson.
+   */
+  protected readonly src = computed<SafeResourceUrl>(() =>
+    this.sanitizer.bypassSecurityTrustResourceUrl(`https://www.youtube.com/embed/${this.yt()}?rel=0`),
+  );
   protected readonly x = signal(10);
   protected readonly y = signal(10);
 
