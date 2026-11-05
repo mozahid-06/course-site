@@ -78,13 +78,12 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - On the first request after this feature is deployed, every existing student is given every current course, so nobody loses access. After that, access is exactly what the admin sets.
 - Payment is manual for now: the student pays you (for example bKash or Nagad), then you give the course in the Admin panel.
 - Access is tied to the **folder name**. Renaming a course in **Admin panel → Files** moves the enrollments with it; renaming it in R2 does not.
-- Home screen: course cards with progress (a student with one course goes straight in). Inside a course the sidebar shows the folder tree: folders open and close at any depth, show done/total, expand to the open lesson, remember what was open, and a search box filters lessons.
+- Home screen: the course list, as dense rows with progress. The site always opens here. Inside a course the sidebar shows the folder tree: folders open and close at any depth, show done/total, expand to the open lesson, remember what was open, and a search box filters lessons.
 
 ## PDF notes
 
 - In the PDF viewer students can highlight, write text, draw, add stamps/images, erase and undo. Notes are **private to each student**, saved automatically to their account (D1 table `pdf_notes`, one row per student and PDF) and reloaded on any device.
 - **Hide my notes** shows the clean original and keeps the notes; **Reset to original** deletes them after a confirmation. The PDF in R2 is never changed.
-- **Full window** fills the browser window (not the whole screen) with the toolbar inside; `Esc` exits.
 - Limit: about 1.5 MB of notes per PDF (large stamp images can hit it).
 - **Download stays off, always:** download/save buttons are removed, `supportsDownloading` is `false`, `Ctrl/Cmd+S` and `Ctrl/Cmd+P` are blocked, and print and open-file are off. Do not enable them.
 

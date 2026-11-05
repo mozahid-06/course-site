@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { YtPlayer } from './yt-player';
@@ -163,8 +163,6 @@ export class Course {
     // page is idle, so the first PDF opens without waiting on the (now lazy) viewer.
     const idle = (window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
     idle(() => { void import('./pdf-viewer').then((m) => m.prefetchPdfAssets()); });
-    // A student with a single course goes straight into it
-    effect(() => { const cs = this.api.courses(); if (cs.length === 1 && !untracked(() => this.view())) this.openCourse(cs[0]); });
     // The header search can jump to a course or a lesson from anywhere in the app.
     effect(() => {
       const req = this.search.request();

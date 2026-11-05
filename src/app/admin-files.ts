@@ -38,7 +38,6 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
       class="files"
       aria-label="Course files"
       (document:keydown.escape)="onEsc()"
-      (document:click)="closeRowMenu()"
       (dragenter)="dragEnter($event)"
       (dragover)="dragOver($event)"
       (dragleave)="dragLeave()"
@@ -192,27 +191,14 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
                 </button>
               }
-              <span class="files-more">
-                <button
-                  type="button"
-                  class="files-tool"
-                  aria-haspopup="menu"
-                  [attr.aria-expanded]="rowMenu() === row.path"
-                  [attr.aria-label]="'More actions for ' + row.name"
-                  (click)="toggleRowMenu($event, row.path)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5h.01M12 12h.01M12 19h.01" /></svg>
-                </button>
-                @if (rowMenu() === row.path) {
-                  <div class="menu" role="menu" [attr.aria-label]="'Actions for ' + row.name">
-                    @if (row.kind === 'youtube') {
-                      <button type="button" role="menuitem" class="d" (click)="removeYt(row.yt!)">Delete</button>
-                    } @else {
-                      <button type="button" role="menuitem" class="d" (click)="askDelete(row.name, row.path, row.kind)">Delete</button>
-                    }
-                  </div>
-                }
-              </span>
+              <button type="button" class="files-tool danger" title="Delete" [attr.aria-label]="'Delete ' + row.name" (click)="removeRow(row)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16" />
+                  <path d="M9 7V4.5h6V7" />
+                  <path d="M6.5 7l.9 12.5h9.2L17.5 7" />
+                  <path d="M10 10.5v6M14 10.5v6" />
+                </svg>
+              </button>
             </div>
           </div>
         }
@@ -324,9 +310,6 @@ export class AdminFiles implements OnDestroy {
     void this.load();
     void this.api.init();
   });
-
-  /** The row whose `⋯` menu is open, keyed by path. */
-  protected readonly rowMenu = signal<string | null>(null);
 
   protected readonly path = signal('');
   protected readonly dragging = signal(false);
@@ -513,23 +496,18 @@ export class AdminFiles implements OnDestroy {
 
   protected open(path: string): void {
     this.closeAsk();
-    this.closeRowMenu();
     this.path.set(path);
     void this.load();
   }
 
-  protected toggleRowMenu(event: Event, path: string): void {
-    event.stopPropagation();
-    this.rowMenu.update((p) => (p === path ? null : path));
+  /** Delete a row: YouTube lessons use their own removal, files and folders the dialog. */
+  protected removeRow(row: Row): void {
+    if (row.kind === 'youtube') this.removeYt(row.yt!);
+    else this.askDelete(row.name, row.path, row.kind);
   }
 
-  protected closeRowMenu(): void {
-    this.rowMenu.set(null);
-  }
-
-  /** Escape closes the open row menu first, then the open dialog. */
+  /** Escape closes the open dialog. */
   protected onEsc(): void {
-    if (this.rowMenu()) { this.closeRowMenu(); return; }
     this.closeAsk();
   }
 

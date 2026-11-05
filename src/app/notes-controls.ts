@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { PdfViewer } from './pdf-viewer';
 
 /**
- * The PDF notes controls (status, full window, hide/show, delete), shared by the
+ * The PDF notes controls (status, hide/show, delete), shared by the
  * lesson bar and the resource-PDF modal so both screens show exactly the same UI.
  * The parent owns the `PdfViewer` (as a `viewChild`) and passes it in; the viewer
  * itself no longer draws any chrome.
@@ -13,18 +13,6 @@ import { PdfViewer } from './pdf-viewer';
   template: `
     <div class="notes-controls">
       @if (viewer().status(); as s) { <span class="notes-status" aria-live="polite">{{ s }}</span> }
-      @if (viewer().fullWindow()) {
-        <button type="button" class="notes-btn" (click)="viewer().toggleExpanded()"
-          [attr.aria-label]="viewer().expanded() ? 'Exit full window' : 'Full window'"
-          [title]="viewer().expanded() ? 'Exit full window' : 'Full window'">
-          @if (viewer().expanded()) {
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" /></svg>
-          } @else {
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" /></svg>
-          }
-          <span class="lbl">{{ viewer().expanded() ? 'Exit full window' : 'Full window' }}</span>
-        </button>
-      }
       <button type="button" class="notes-btn" (click)="viewer().toggleHidden()" [disabled]="!viewer().ready()"
         [attr.aria-label]="viewer().hidden() ? 'Show my notes' : 'Hide my notes'"
         [title]="viewer().hidden() ? 'Show my notes' : 'Hide my notes'">

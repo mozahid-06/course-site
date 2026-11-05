@@ -30,7 +30,6 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
   selector: 'app-pdf-viewer',
   changeDetection: ChangeDetectionStrategy.Eager,
   imports: [NgxExtendedPdfViewerModule],
-  host: { '[class.expanded]': 'expanded()' },
   template: `
     <div class="viewer-wrap">
       <ngx-extended-pdf-viewer
@@ -84,10 +83,7 @@ export class PdfViewer {
   private readonly narrowQuery = matchMedia('(max-width: 820px)');
   protected readonly narrow = signal(this.narrowQuery.matches);
   readonly key = input.required<string>();
-  readonly fullWindow = input(true);
   protected readonly url = computed(() => this.api.mediaUrl(this.key()));
-  /** Public so the lesson bar in the parent can drive the viewer. */
-  readonly expanded = signal(false); // fills the browser window (not the whole screen)
   readonly hidden = signal(false);
   readonly ready = signal(false);
   readonly status = signal('');
@@ -105,22 +101,14 @@ export class PdfViewer {
     const block = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['s', 'p'].includes(e.key?.toLowerCase())) { e.preventDefault(); e.stopImmediatePropagation(); }
     };
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && this.expanded()) this.toggleExpanded(); };
     const onNarrow = (e: MediaQueryListEvent) => this.narrow.set(e.matches);
     window.addEventListener('keydown', block, true);
-    window.addEventListener('keydown', esc);
     this.narrowQuery.addEventListener('change', onNarrow);
     inject(DestroyRef).onDestroy(() => {
       window.removeEventListener('keydown', block, true);
-      window.removeEventListener('keydown', esc);
       this.narrowQuery.removeEventListener('change', onNarrow);
       if (this.timer) { clearTimeout(this.timer); void this.save(); }
     });
-  }
-
-  toggleExpanded(): void {
-    this.expanded.update((v) => !v);
-    setTimeout(() => window.dispatchEvent(new Event('resize')), 50); // let the PDF re-fit to the new size
   }
 
   private current(): object[] {

@@ -81,8 +81,8 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/course.ts` | Course list (dense rows), folder browser with breadcrumb, lesson view + lesson bar, Mark as complete |
 | `src/app/player.ts` | HLS/MP4 lesson: `<hlsjs-video>` or `<video>` inside the Video.js skin (autoplay, un-muted) with a loading cover (spinner; play button if autoplay is blocked) + moving email watermark |
 | `src/app/yt-player.ts` | YouTube lesson: `<video-player><video-skin><youtube-video>` (autoplay, un-muted) with an opaque loading cover until playback (spinner; play button if autoplay is blocked) + the same moving email watermark |
-| `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off; draws no chrome of its own |
-| `src/app/notes-controls.ts` | The shared PDF notes controls (status · full window · hide/show · delete) rendered by both the lesson bar and the resource-PDF modal header |
+| `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), download/print locked off; draws no chrome of its own |
+| `src/app/notes-controls.ts` | The shared PDF notes controls (status · hide/show · delete) rendered by both the lesson bar and the resource-PDF modal header |
 | `src/app/lesson-resources.ts` | Lesson Resources tab: admin Link/PDF form, link rows, PDF rows that open the shared viewer in a full-window modal |
 | `src/app/admin.ts` | Admin **Users** view (single heading, one stats line, borderless table), the shared options menu, and the user detail dialog; hosts the Files view |
 | `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, YouTube lessons (a toolbar button + rows with change-link/delete + a CSV batch import), one position box per row, and the shared options menu |

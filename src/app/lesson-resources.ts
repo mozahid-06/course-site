@@ -97,7 +97,7 @@ import { NotesControls } from './notes-controls';
               @if (pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
               <button #closeBtn type="button" class="lr-viewer-close" aria-label="Close PDF" (click)="close()">Close</button>
             </header>
-            <app-pdf-viewer [key]="r.url" [fullWindow]="false" />
+            <app-pdf-viewer [key]="r.url" />
           </div>
         } @placeholder {
           <div class="lr-viewer lr-viewer-loading" aria-live="polite">Loading PDF...</div>
