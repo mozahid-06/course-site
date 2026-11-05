@@ -21,6 +21,8 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | Not YouTube unlisted (as the storage) | The video ID is visible in DevTools and the link is permanent, so it cannot protect paid content. |
 | YouTube lessons are opt-in, managed in D1 | Sometimes a lesson already lives on YouTube and uploading it again is wasted work. Lessons are stored in the `youtube_lessons` table and edited from **Admin panel → Files** — the **YouTube** button adds one to the folder you are in (no redeploy, no upload, no R2 cost). It is an addition to the bucket listing, not a replacement for it. `worker/youtube.js` is only a first-run seed. |
 | YouTube lesson keys are R2-key shaped | So progress, comments, notes, resources and enrollments all key off the same `lesson` string as a real file. The course is the first segment, so a YouTube-only course is a normal course and can be granted to students. A real file with the same key wins the clash. |
+| One CSV format for batch import | An admin often has dozens of existing YouTube lessons to add, and a spreadsheet is how they arrive. A single CSV (`name,link`, with extra columns and a header ignored, and the link column detected by its URL) keeps one parser and one format to maintain; the browser parses it and reuses the single-add endpoint, so there is no Worker change. |
+| YouTube lessons in the Files view get a CSV batch import, and the toolbar button always toasts (not disabled) | The button is now a normal, hoverable button; at the top level it explains that a lesson needs a course rather than rendering `button:disabled{cursor:wait}`. |
 | Cloudflare R2 for storage | Free egress, about $0.015/GB-month. |
 | Worker serves media | Checks a login before any byte is sent; supports range requests so seeking works. |
 | HLS supported, MP4 also served | The Worker lists and serves both. HLS (`tools/make-hls.sh`) avoids a single downloadable file; plain MP4 is simpler to upload. The old `ALLOW_MP4` switch was removed from the code, so MP4 is always served. |
@@ -73,7 +75,8 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/yt-player.ts` | YouTube lesson: `<iframe>` embed + the same moving email watermark |
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off |
 | `src/app/admin.ts` | Admin panel UI (users and course checkboxes) with a Files/Users toggle |
-| `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, and YouTube lessons (a toolbar button + rows with change-link/delete) |
+| `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, and YouTube lessons (a toolbar button + rows with change-link/delete + a CSV batch import) |
+| `src/app/youtube-csv.ts` | Pure CSV parser for the YouTube batch import (`parseYoutubeCsv`, `ytId`); no Angular imports |
 | `src/app/upload.ts` | Uploader: part sizing, presigned PUTs, 3 parallel parts, progress, conflict/retry, resume from `localStorage` after a reload |
 | `src/styles.css` | All styling and the bundled logo font |
 | `src/curse-of-the-zombie.ttf` | Logo font (capitals only; CSS uppercases the logo) |
@@ -205,6 +208,7 @@ Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35`
 ## 4d. YouTube lessons (added later; managed from the Files view)
 
 - Lessons live in the D1 table `youtube_lessons (id, yt, created)` and are added/edited/deleted from **Admin panel → Files** — the **YouTube** button in the folder toolbar adds one to the folder you are in (the path is that folder, so there is no course/folder field; the button is disabled at the top level), and the folder's lessons show as rows with **Change link** / **Delete** (`GET/POST/DELETE /api/admin/youtube`). `POST` parses the link with `ytId()` (bare id, watch link, `youtu.be`, `/embed`, `/shorts`, `/live`), refuses anything else with `400`, upserts by path, calls `invalidateCourse()`, and reports `shadowed` when an R2 object already uses the id. So a change is live with no redeploy. (An earlier pass had a separate Admin → YouTube tab and `src/app/admin-youtube.ts`; both were removed here.)
+- A CSV file can add many at once: the dialog's file input is parsed in the browser by `src/app/youtube-csv.ts` (`parseYoutubeCsv`) — it strips a BOM, handles RFC-4180 quoting, drops an optional header, and finds the link column by its YouTube-URL shape (the name is the column to its left) — then posts one `addYoutubeLesson` per valid row into the current folder (N client calls, **no Worker change**) and reports the skipped rows.
 - `worker/youtube.js` is only a first-run seed: `migrate()` creates the table (guarded by an `sqlite_master` existence check) and, only on that first creation, copies `YOUTUBE_LESSONS` in. The guard is what makes a later delete permanent.
 - `listCourse` reads the table after the R2 walk.
 - The id is R2-key shaped on purpose: `id` is the full path, so `watched`, `comments`, `video_notes`, `pdf_notes`, `resources` and `enrollments` treat a YouTube lesson exactly like a file lesson. The first segment is the course, so a YouTube-only course appears in the admin Courses list and can be granted.

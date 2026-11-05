@@ -12,7 +12,7 @@ course-site/
   package.json           Angular + wrangler; `npm run deploy` builds then deploys
   worker/index.js        API, auth, admin, course listing, media streaming (the Worker)
   worker/files.js        File manager API: listing, folders, move/rename, delete, upload handshake
-  worker/youtube.js      YouTube lessons: an optional first-run seed (lessons are managed in the Admin panel)
+  worker/youtube.js      YouTube lessons: an optional first-run seed (lessons are managed from the Files view)
   worker/s3.js           R2 S3 signing (aws4fetch): server calls and presigned browser PUTs
   src/
     styles.css           All styling: tokens, light/dark, desktop + phone layouts
@@ -97,7 +97,9 @@ Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRE
 
 A lesson can be a YouTube video instead of a file. This costs nothing and needs no upload, which is the point for lessons already on YouTube.
 
-Add one from the site: sign in as an admin, open **Admin panel → Files**, open the course (and folder) you want, and click **YouTube** in the toolbar. Fill in **Lesson name** and the **YouTube link** (any usual link — watch, `youtu.be`, `/embed`, `/shorts`, `/live` — or just the video id); the folder you are in is the path, so there is no course or folder field. The lesson then appears as a row in that folder, with **Change link** and **Delete**. The button is disabled at the top level — a lesson needs a course, so create (or open) the course folder first.
+Add one from the site: sign in as an admin, open **Admin panel → Files**, open the course (and folder) you want, and click **YouTube** in the toolbar. Fill in **Lesson name** and the **YouTube link** (any usual link — watch, `youtu.be`, `/embed`, `/shorts`, `/live` — or just the video id); the folder you are in is the path, so there is no course or folder field. The lesson then appears as a row in that folder, with **Change link** and **Delete**. A lesson needs a course, so at the top level the button tells you to open (or create) the course folder first.
+
+Adding many at once: in the same dialog, choose a **CSV** file. Each row is `name,link`; a header row and extra columns are fine (a spreadsheet export such as `No,Date,Title,URL` works as-is) — the link column is found by its YouTube URL, and the name is the column to its left. Once the file is chosen the dialog previews how many lessons were found and lists any rows it skipped, then **Add N lessons** adds them all to the folder you are in (a name that is already there has its link updated). The file is read in the browser only — nothing is uploaded and there is no server change.
 
 Lessons are stored in D1 (table `youtube_lessons`), so a change shows up straight away — **no redeploy**.
 

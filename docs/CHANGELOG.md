@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Added (YouTube CSV import)
+- Add many YouTube lessons at once: in the Files → YouTube dialog, choose a **CSV** (`name,link` per row; a header row and extra columns like a `No,Date,Title,URL` export are accepted — the link column is detected by its YouTube URL and the name is the column to its left). The dialog previews the found and skipped rows, then **Add N lessons** adds them all into the current folder and updates any name that already exists. The file never leaves the browser; new pure module `src/app/youtube-csv.ts`; no Worker change.
+
 ### Changed (YouTube lessons are now managed in the UI)
 - YouTube lessons now live in the D1 table `youtube_lessons` and are added, edited and deleted from **Admin panel → Files** — the **YouTube** button adds one to the folder you are in, and its lessons show as rows there (change link / delete) — no code edit, no redeploy. `listCourse` reads the table instead of a module. The separate Admin → YouTube tab and `src/app/admin-youtube.ts` were removed.
 - Admin endpoints: `GET/POST/DELETE /api/admin/youtube`. `POST` parses the link (watch/`youtu.be`/`embed`/`shorts`/`live`/bare id), refuses anything else, upserts by path, invalidates the course cache, and returns `shadowed` when a real file already uses the path.
