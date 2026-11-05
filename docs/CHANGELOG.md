@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Changed (players)
+- Both lesson players are now **Video.js 10** web components on the **Default** skin. YouTube lessons render `<video-player><video-skin><youtube-video>` — the **Share** button and **"Watch on YouTube"** are gone; self-hosted lessons render `<hlsjs-video>` for HLS and a native `<video>` for MP4 (and other files) inside the same `<video-player><video-skin>` shell. The moving email watermark, the `@defer` lazy chunks and the Worker are unchanged.
+- `hls.js` is no longer imported directly (`src/app/player.ts` has no player library code of its own); it stays a transitive dependency of `@videojs/hlsjs-video`, so HLS playback is unchanged.
+- Bundles: initial JS transfer is **65.7 kB** (was 65.63 kB — the ~70 B is the added CSS, not library code). Video.js core is a **shared lazy** chunk (367 kB raw / ~73 kB transfer); the `player` lazy chunk is 638 kB raw / ~162 kB transfer (carries hls.js); the `yt-player` lazy chunk is 14 kB raw / ~4.9 kB transfer. `main-*.js` contains no Video.js or hls.js code.
+- Verified in a real browser (local Worker + R2): both players render the skin control bar and watermark, MP4 plays (`readyState 4`, `currentTime` advancing), HLS plays a visible frame, the `ended` output marks the lesson complete, and rapid lesson switching is clean.
+
 ### Changed (lazy loading)
 - The PDF viewer (`ngx-extended-pdf-viewer`) and the admin panel are **lazy chunks** loaded with Angular `@defer`, so they are no longer in the initial bundle. The PDF viewer's on-idle warm-up is now a dynamic `import()` — a static `prefetchPdfAssets` import (same module as the viewer) was what pinned the library into the entry bundle.
 - A second pass extends the same treatment across the site: the **lesson area** (`player`, `yt-player`, `lesson-panel` + discussion/resources), **login** and the **course shell** are lazy chunks too. Every deferred block has a layout-matched placeholder, an `@error` fallback and `aria-live`, so a slow or failed chunk shows a message rather than a blank pane.
