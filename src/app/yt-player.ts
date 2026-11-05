@@ -16,6 +16,15 @@ import { Api } from './api';
         <video-player>
           <video-skin>
             <youtube-video [source]="source()" playsinline></youtube-video>
+            <!--
+              Opaque poster. The skin's media-poster sits over the media, but because we
+              slot nothing into it the YouTube embed's own thumbnail, title, channel and red
+              play button show through until playback starts. This covers them; the skin
+              hides the poster on play (and never re-shows it after pause/seek).
+            -->
+            <div slot="poster" class="yt-poster" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+            </div>
           </video-skin>
         </video-player>
       } @else {

@@ -143,6 +143,11 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.6rem clamp(1r
 .vw video-player,.vw video-skin{display:block;width:100%}
 .vw video-skin{aspect-ratio:16/9}
 .vw video-skin>:is(video,youtube-video,hlsjs-video),.vw video-skin>[slot=poster]{width:100%;height:100%;display:block}
+/* Cover the YouTube embed until playback starts, so its thumbnail/title/red button never flash.
+   The slotted poster inherits pointer-events:none from media-poster; set it explicitly too so
+   taps always fall through to the skin's play gesture. */
+.yt-poster{position:relative;background:#0b1220;pointer-events:none}
+.yt-poster svg{position:absolute;inset:0;margin:auto;width:clamp(40px,11%,64px);height:auto;color:rgba(255,255,255,.9);filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
 .vw iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#000}
 .wm{position:absolute;z-index:2;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
 ngx-extended-pdf-viewer{line-height:normal;display:block}
