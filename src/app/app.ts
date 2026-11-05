@@ -128,7 +128,9 @@ interface LessonHit {
           </button>
         </div>
       </header>
-      @if (admin() && me.is_admin) { <app-admin /> } @else { <app-course /> }
+      @if (admin() && me.is_admin) {
+        @defer (on immediate) { <app-admin /> }
+      } @else { <app-course /> }
     } @else if (api.me() === null) {
       <app-login />
     }
