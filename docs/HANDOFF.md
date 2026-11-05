@@ -228,7 +228,7 @@ Not verified: clicking through the YouTube button/rows in the Files view in a re
 - The PDF viewer and the admin panel are lazy chunks loaded with Angular `@defer` (in `course.ts` and `app.ts`) instead of riding in the initial bundle. Initial JS transfer is ~80 kB (was ~215 kB).
 - The PDF viewer warms on idle via a **dynamic** `import('./pdf-viewer')`. A static import of `prefetchPdfAssets` — which lives in the same module as the viewer, and so pulls in `ngx-extended-pdf-viewer` — is what kept the whole library in the entry chunk; that is the trap to remember when deferring anything else. The reader tuning in `pdf-viewer.ts` (`disableStream`, `disableAutoFetch`, `rangeChunkSize`) still runs when the lazy module loads, before the viewer initialises.
 - Both use `@defer (on immediate)` with a minimal placeholder. The admin block has **no prefetch**, so a student never fetches admin code; the PDF block is fine to warm for everyone.
-- Not verified: opening a PDF and the admin panel in a real browser (no browser harness in this environment). Check the Network tab after deploy: the `pdf-viewer` chunk should not appear until a PDF is opened.
+- Not verified: opening a PDF and the admin panel in a real browser (no browser harness in this environment). Check the Network tab after deploy: the `pdf-viewer` chunk is warmed on idle, so it normally appears without opening a PDF; the `admin` chunk must never appear for a non-admin.
 
 ## 5. Known limitations and risks
 
