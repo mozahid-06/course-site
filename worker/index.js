@@ -87,6 +87,19 @@ async function migrate(env) {
   const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
   if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
+  // YouTube lessons are managed from the Admin panel. Created here (before listCourse runs
+  // below) and seeded once from worker/youtube.js, so the hadYt guard makes a later delete
+  // permanent: a removed seed never comes back.
+  const hadYt = await env.DB.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name = 'youtube_lessons'").first();
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)').run();
+  if (!hadYt.c) {
+    for (const [rawPath, link] of Object.entries(YOUTUBE_LESSONS)) {
+      const parts = String(rawPath).split('/').map((s) => s.trim()).filter(Boolean);
+      const yt = ytId(link);
+      if (parts.length < 2 || !yt) continue;
+      await env.DB.prepare('INSERT OR IGNORE INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?)').bind(parts.join('/'), yt, Date.now()).run();
+    }
+  }
   const had = await env.DB.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type = 'table' AND name = 'enrollments'").first();
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS enrollments (user_id INTEGER NOT NULL, course TEXT NOT NULL, PRIMARY KEY (user_id, course))').run();
   if (!had.c) { // first deploy only: today's students keep access to every current course
@@ -178,14 +191,11 @@ async function listCourse(env) {
     secs.get(sectionName).push({ id: key, title, kind: pdf ? 'pdf' : 'video' });
   }
 
-  // Merge YouTube lessons from worker/youtube.js. The key is a path like an R2 key
-  // (<Course>/<Folder>/<Name>); the first segment is the course. A course that has only
-  // YouTube lessons is created here, so it still appears and can be granted to students.
-  for (const [rawPath, link] of Object.entries(YOUTUBE_LESSONS)) {
-    const parts = String(rawPath).split('/').map((s) => s.trim()).filter(Boolean);
-    if (parts.length < 2) continue; // needs a course and a lesson name
-    const videoId = ytId(link);
-    if (!videoId) continue; // ignore entries with no usable link
+  // YouTube lessons managed from the Admin panel (D1). The id is a path like an R2
+  // key (<Course>/<Folder>/<Name>); the first segment is the course.
+  for (const row of (await env.DB.prepare('SELECT id, yt FROM youtube_lessons').all()).results) {
+    const parts = String(row.id).split('/').map((s) => s.trim()).filter(Boolean);
+    if (parts.length < 2 || !row.yt) continue;
     const id = parts.join('/');
     const courseName = parts[0];
     if (!courses.has(courseName)) courses.set(courseName, new Map());
@@ -193,7 +203,7 @@ async function listCourse(env) {
     if ([...secs.values()].some((list) => list.some((l) => l.id === id))) continue; // a real file wins a clash
     const sectionName = parts.slice(1, -1).join(' / ');
     if (!secs.has(sectionName)) secs.set(sectionName, []);
-    secs.get(sectionName).push({ id, title: parts[parts.length - 1], kind: 'youtube', yt: videoId });
+    secs.get(sectionName).push({ id, title: parts[parts.length - 1], kind: 'youtube', yt: row.yt });
   }
 
   const data = [...courses].sort((a, b) => NUM.compare(a[0], b[0])).map(([courseName, secs]) => {
