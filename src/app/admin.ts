@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, OnInit } from '@angular/core';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
 
@@ -33,43 +33,39 @@ const MODES: { key: CourseMode; label: string }[] = [
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <main class="admin" (document:keydown.escape)="onEsc()">
+      @if (view() === 'files') {
+        @defer (on immediate) {
+          <app-admin-files (back)="showUsers()" />
+        } @placeholder {
+          <div class="defer-fill" aria-live="polite">Loading files...</div>
+        }
+      } @else {
       <!-- Header -->
       <div class="adm-top">
         <div>
-          <h1>Admin</h1>
-          <p class="adm-sub">{{ view() === 'files' ? 'Upload, rename, move and delete course files.' : 'Search and filter below; the matching users are listed underneath.' }}</p>
+          <h1>Users</h1>
+          <p class="adm-sub">Search and filter below; the matching users are listed underneath.</p>
         </div>
         <div class="adm-top-actions">
-          <button type="button" class="adm-ico wide" [class.on]="view() === 'files'" [attr.aria-pressed]="view() === 'files'" [title]="view() === 'files' ? 'Back to users' : 'Course files'" (click)="toggleView()">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.5h5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z" />
+          <button type="button" class="link" (click)="showFiles()">Course files</button>
+          <button type="button" class="icon-btn" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
+            <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
+              <path d="M21 3v5h-5" />
             </svg>
-            <span>Files</span>
           </button>
-          @if (view() === 'users') {
-            <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
-              <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
-                <path d="M21 3v5h-5" />
-              </svg>
-            </button>
-            <button type="button" class="p" (click)="openAdd()">+ Add users</button>
-          }
+          <button type="button" class="p" (click)="openAdd()">Add users</button>
         </div>
       </div>
 
-      @if (view() === 'files') {
-        <app-admin-files />
-      } @else {
       <!-- Overview -->
-      <section class="adm-stats" aria-label="Overview">
-        <div class="stat"><b>{{ users().length }}</b><span>Users</span></div>
-        <div class="stat"><b>{{ students() }}</b><span>Students</span></div>
-        <div class="stat"><b>{{ admins() }}</b><span>Admins</span></div>
-        <div class="stat"><b>{{ googleCount() }}</b><span>Google linked</span></div>
-        <div class="stat"><b>{{ watchedTotal() }}</b><span>Lessons watched</span></div>
-        <div class="stat"><b>{{ courseList().length }}</b><span>Courses</span></div>
-      </section>
+      <p class="adm-stats-line">
+        {{ users().length }} user{{ users().length === 1 ? '' : 's' }} ·
+        {{ students() }} student{{ students() === 1 ? '' : 's' }} ·
+        {{ admins() }} admin{{ admins() === 1 ? '' : 's' }} ·
+        {{ googleCount() }} Google-linked ·
+        {{ courseList().length }} course{{ courseList().length === 1 ? '' : 's' }}
+      </p>
 
       <!-- Filters: every filter lives here, the results follow below -->
       <section class="adm-card adm-filters" aria-label="Filters">
@@ -158,7 +154,8 @@ const MODES: { key: CourseMode; label: string }[] = [
           <label class="adm-check">
             <input type="checkbox" aria-label="Select all users" [checked]="allSelected()" (change)="toggleAll($any($event.target).checked)" />
           </label>
-          <span>User</span>
+          <span class="row-name">User</span>
+          <span class="adm-col-role">Role</span>
           <span class="adm-col-prog">Progress</span>
           <span class="adm-col-acc">Access</span>
           <span class="adm-col-act"></span>
@@ -166,7 +163,7 @@ const MODES: { key: CourseMode; label: string }[] = [
 
         @if (loading()) {
           @for (i of [1, 2, 3, 4, 5]; track i) {
-            <div class="adm-skel" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="adm-skel" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
           }
         } @else if (!filtered().length) {
           <p class="adm-empty">No users match. Try a different search or filter.</p>
@@ -176,19 +173,14 @@ const MODES: { key: CourseMode; label: string }[] = [
               <label class="adm-check" (click)="$event.stopPropagation()">
                 <input type="checkbox" [attr.aria-label]="'Select ' + u.email" [checked]="selected().has(u.id)" (change)="toggleSel(u.id)" />
               </label>
-              <div class="adm-user">
-                <span class="av">{{ u.email.charAt(0).toUpperCase() }}</span>
-                <span class="who">
-                  <strong>{{ u.email }}</strong>
-                  <small>
-                    @if (u.owner) { Owner } @else if (u.is_admin) { Administrator } @else { Student }
-                    @if (u.google) { · Google sign-in }
-                  </small>
-                </span>
-              </div>
+              <span class="row-name" [title]="u.email">{{ u.email }}</span>
+              <span class="adm-col-role">
+                @if (u.owner) { Owner } @else if (u.is_admin) { Admin } @else { Student }
+                @if (u.google) { · Google }
+              </span>
               <span class="adm-col-prog">{{ u.watched }} lesson{{ u.watched === 1 ? '' : 's' }}</span>
               <span class="adm-col-acc">
-                @if (u.is_admin) { <span class="pill adm">All courses</span> }
+                @if (u.is_admin) { <span class="pill warn">All courses</span> }
                 @else { <span class="pill">{{ u.courses.length }} course{{ u.courses.length === 1 ? '' : 's' }}</span> }
               </span>
               <span class="adm-col-act">
@@ -201,20 +193,17 @@ const MODES: { key: CourseMode; label: string }[] = [
       }
     </main>
 
-    <!-- Detail drawer -->
+    <!-- User detail dialog -->
     @if (active(); as u) {
       <div class="adm-scrim" (click)="closeDrawer()"></div>
-      <aside class="adm-drawer" role="dialog" aria-modal="true" [attr.aria-label]="'Manage ' + u.email">
-        <header class="adm-drawer-top">
-          <span class="av big">{{ u.email.charAt(0).toUpperCase() }}</span>
-          <div class="who">
-            <strong>{{ u.email }}</strong>
-            <small>{{ u.is_admin ? (u.owner ? 'Owner · full access' : 'Administrator') : 'Student' }}@if (u.google) { · Google sign-in }</small>
-          </div>
+      <div class="adm-dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Manage ' + u.email">
+        <header class="adm-dialog-top">
+          <h3>{{ u.email }}</h3>
           <button type="button" class="adm-close" aria-label="Close" (click)="closeDrawer()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
         </header>
 
-        <div class="adm-drawer-body" data-scroll-top>
+        <div class="adm-form" data-scroll-top>
+          <p class="adm-muted sm">{{ u.is_admin ? (u.owner ? 'Owner · full access' : 'Administrator') : 'Student' }}@if (u.google) { · Google sign-in }</p>
           <div class="adm-kpis">
             <div><b>{{ u.watched }}</b><span>Lessons watched</span></div>
             <div><b>{{ u.is_admin ? courseList().length : u.courses.length }}</b><span>Courses open</span></div>
@@ -263,7 +252,10 @@ const MODES: { key: CourseMode; label: string }[] = [
             }
           </section>
         </div>
-      </aside>
+        <footer class="adm-dialog-foot">
+          <button type="button" (click)="closeDrawer()">Close</button>
+        </footer>
+      </div>
     }
 
     <!-- Add users dialog -->
@@ -438,7 +430,23 @@ export class Admin implements OnInit {
 
   /** Which screen this panel shows. Admin-only either way. */
   protected readonly view = signal<'users' | 'files'>('users');
-  protected toggleView(): void { this.view.update((v) => (v === 'files' ? 'users' : 'files')); }
+
+  constructor() {
+    // Keep the admin sub-view in the hash, so the browser Back button returns to Users.
+    const onHash = () => this.view.set(location.hash === '#files' ? 'files' : 'users');
+    window.addEventListener('hashchange', onHash);
+    inject(DestroyRef).onDestroy(() => window.removeEventListener('hashchange', onHash));
+    if (location.hash === '#files') this.view.set('files');
+  }
+
+  protected showFiles(): void {
+    this.view.set('files');
+    if (location.hash !== '#files') location.hash = 'files';
+  }
+  protected showUsers(): void {
+    this.view.set('users');
+    if (location.hash) history.pushState(null, '', location.pathname + location.search);
+  }
 
   protected readonly users = signal<AdminUser[]>([]);
   protected readonly loading = signal(true);
@@ -493,7 +501,6 @@ export class Admin implements OnInit {
   protected readonly admins = computed(() => this.users().filter((u) => u.is_admin).length);
   protected readonly students = computed(() => this.users().filter((u) => !u.is_admin).length);
   protected readonly googleCount = computed(() => this.users().filter((u) => u.google).length);
-  protected readonly watchedTotal = computed(() => this.users().reduce((n, u) => n + u.watched, 0));
 
   /** Courses matching the search, with the ticked ones pinned first so a selection can
    *  never be hidden by the query — and stays visible when the list is long. */

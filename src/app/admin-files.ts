@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, output, signal } from '@angular/core';
 import { Api, FileEntry, FileListing, YoutubeLesson } from './api';
 import { CsvReject, CsvRow, parseYoutubeCsv } from './youtube-csv';
 import { UploadJob, Uploader } from './upload';
@@ -36,13 +36,18 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
     <section
       class="files"
       aria-label="Course files"
-      (document:keydown.escape)="closeAsk()"
+      (document:keydown.escape)="onEsc()"
+      (document:click)="closeRowMenu()"
       (dragenter)="dragEnter($event)"
       (dragover)="dragOver($event)"
       (dragleave)="dragLeave()"
       (drop)="drop($event)"
     >
       <div class="files-head">
+        <button type="button" class="back-btn" (click)="back.emit()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+          Users
+        </button>
         <nav class="files-crumbs" aria-label="Folder path">
           <button type="button" [class.here]="!path()" (click)="open('')">Course files</button>
           @for (c of crumbs(); track c.path) {
@@ -52,12 +57,13 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
         </nav>
         <div class="files-head-acts">
           <input #picker type="file" multiple hidden (change)="pick(picker)" />
-          <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh folder" [disabled]="loading()" (click)="load()">
+          <button type="button" class="icon-btn" title="Refresh" aria-label="Refresh folder" [disabled]="loading()" (click)="load()">
             <svg [class.spinning]="loading()" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
               <path d="M21 3v5h-5" />
             </svg>
           </button>
+          <button type="button" (click)="newFolder()">New folder</button>
           <button type="button" class="files-yt-btn" title="Add a YouTube lesson to this folder" (click)="openYt()">
             <svg class="files-yt" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
             YouTube
@@ -66,7 +72,6 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
             <svg class="files-up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5" /><path d="m7 10 5-5 5 5" /><path d="M5 19h14" /></svg>
             Upload
           </button>
-          <button type="button" (click)="newFolder()">New folder</button>
         </div>
       </div>
 
@@ -169,9 +174,6 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
                 <button type="button" class="files-tool" title="Move" aria-label="Move file" (click)="askMove(row.path, 'file')">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
                 </button>
-                <button type="button" class="files-tool danger" title="Delete" aria-label="Delete file" (click)="askDelete(row.name, row.path, 'file')">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
-                </button>
               } @else if (row.kind === 'folder') {
                 <button type="button" class="files-tool" title="Rename" aria-label="Rename folder" (click)="askRename(row.name, row.path, 'folder')">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
@@ -182,24 +184,39 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
                   </button>
                 }
-                <button type="button" class="files-tool danger" title="Delete" aria-label="Delete folder" (click)="askDelete(row.name, row.path, 'folder')">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
-                </button>
               } @else {
                 <button type="button" class="files-tool" title="Change link" aria-label="Change YouTube link" (click)="editYt(row.yt!)">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
                 </button>
-                <button type="button" class="files-tool danger" title="Delete" aria-label="Delete YouTube lesson" (click)="removeYt(row.yt!)">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
-                </button>
               }
+              <span class="files-more">
+                <button
+                  type="button"
+                  class="files-tool"
+                  aria-haspopup="menu"
+                  [attr.aria-expanded]="rowMenu() === row.path"
+                  [attr.aria-label]="'More actions for ' + row.name"
+                  (click)="toggleRowMenu($event, row.path)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5h.01M12 12h.01M12 19h.01" /></svg>
+                </button>
+                @if (rowMenu() === row.path) {
+                  <div class="menu" role="menu" [attr.aria-label]="'Actions for ' + row.name">
+                    @if (row.kind === 'youtube') {
+                      <button type="button" role="menuitem" class="d" (click)="removeYt(row.yt!)">Delete</button>
+                    } @else {
+                      <button type="button" role="menuitem" class="d" (click)="askDelete(row.name, row.path, row.kind)">Delete</button>
+                    }
+                  </div>
+                }
+              </span>
             </div>
           </div>
         }
       </div>
 
       @if (!loading() && !rows().length) {
-        <p class="files-empty">This folder is empty. Drop files here to upload.</p>
+        <p class="files-empty">This folder is empty.</p>
       }
 
       @if (dragging()) {
@@ -297,10 +314,15 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 })
 export class AdminFiles implements OnDestroy {
   protected readonly api = inject(Api);
+  /** The toolbar's `← Users`; the Admin shell switches back to the Users view. */
+  readonly back = output<void>();
   protected readonly uploader = new Uploader(this.api, () => {
     void this.load();
     void this.api.init();
   });
+
+  /** The row whose `⋯` menu is open, keyed by path. */
+  protected readonly rowMenu = signal<string | null>(null);
 
   protected readonly path = signal('');
   protected readonly dragging = signal(false);
@@ -487,8 +509,24 @@ export class AdminFiles implements OnDestroy {
 
   protected open(path: string): void {
     this.closeAsk();
+    this.closeRowMenu();
     this.path.set(path);
     void this.load();
+  }
+
+  protected toggleRowMenu(event: Event, path: string): void {
+    event.stopPropagation();
+    this.rowMenu.update((p) => (p === path ? null : path));
+  }
+
+  protected closeRowMenu(): void {
+    this.rowMenu.set(null);
+  }
+
+  /** Escape closes the open row menu first, then the open dialog. */
+  protected onEsc(): void {
+    if (this.rowMenu()) { this.closeRowMenu(); return; }
+    this.closeAsk();
   }
 
   protected size(n: number): string {
@@ -703,20 +741,15 @@ export class AdminFiles implements OnDestroy {
     }
   }
 
-  protected async removeYt(y: { id: string }): Promise<void> {
-    if (!confirm(`Delete the YouTube lesson "${y.id}"?`)) return;
-    this.busy.set(true);
-    this.error.set('');
-    try {
-      await this.api.deleteYoutubeLesson(y.id);
-      this.toast('Deleted');
-      void this.api.init();
-      await this.load();
-    } catch (e) {
-      this.error.set(message(e));
-    } finally {
-      this.busy.set(false);
-    }
+  protected removeYt(y: { id: string }): void {
+    this.openAsk({
+      title: 'Delete YouTube lesson',
+      hint: `“${this.base(y.id)}” is removed from this folder. This cannot be undone.`,
+      label: '',
+      confirm: 'Delete',
+      danger: true,
+      run: async () => { await this.api.deleteYoutubeLesson(y.id); },
+    }, '');
   }
 
   private openAsk(ask: Ask, value: string): void {

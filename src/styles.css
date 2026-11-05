@@ -309,6 +309,7 @@ button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 .adm-top-actions{display:flex;gap:.4rem;align-items:center}
 .admin h1{font-size:20px;font-weight:600}
 .adm-sub{margin:.1rem 0 0;color:var(--muted);font-size:13px}
+.adm-stats-line{margin:.1rem 0 0;color:var(--muted);font-size:13px}
 .adm-yline{margin:0;color:var(--muted);font-size:13px}
 .adm-muted{margin:0;color:var(--muted);font-size:13.5px}
 .adm-muted.sm{font-size:12.5px}
@@ -356,19 +357,13 @@ button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 .adm-list{display:flex;flex-direction:column}
 .adm-results-top{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;padding:.7rem 1rem;border-bottom:1px solid var(--border)}
 .adm-results-top h2{font-size:15px;font-weight:600}
-.adm-lhead,.adm-row,.adm-skel{display:grid;grid-template-columns:32px minmax(0,1fr) 104px 116px 84px;align-items:center;gap:.75rem;padding:0 1rem;min-height:var(--row-h)}
+.adm-lhead,.adm-row,.adm-skel{display:grid;grid-template-columns:32px minmax(0,1fr) 96px 92px 108px 72px;align-items:center;gap:.75rem;padding:0 1rem;min-height:var(--row-h)}
 .adm-lhead{color:var(--muted);font-size:12.5px;border-bottom:1px solid var(--border)}
 .adm-row{border-top:1px solid var(--border);transition:background .12s}
 .adm-row:hover{background:var(--hover)}
 .adm-row.sel{background:var(--hover)}
 .adm-check{display:flex}
-.adm-user{display:flex;align-items:center;gap:.6rem;min-width:0;padding:0;font-weight:500;text-align:left;background:none;min-height:0}
-.adm-user:hover:not(:disabled){background:none}
-.av{width:28px;height:28px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--hover);color:var(--text);font-weight:600;font-size:13px}
-.av.big{width:40px;height:40px;font-size:16px}
-.who{display:grid;min-width:0}
-.who strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.who small{color:var(--muted);font-size:12.5px}
+.adm-col-role{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pill{display:inline-block;padding:.1rem .5rem;border-radius:999px;background:var(--hover);color:var(--muted);font-size:12.5px;font-weight:500;white-space:nowrap}
 .pill.warn{background:var(--amber);color:var(--amber-ink)}
 .adm-col-prog{color:var(--muted);font-size:13px}
@@ -450,7 +445,8 @@ button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 .files-error{margin:0;padding:.5rem .7rem;border:1px solid var(--border);border-left:3px solid var(--danger);border-radius:var(--r-surface);color:var(--danger);font-size:13px}
 .files-empty{margin:0;padding:2rem 1rem;text-align:center;color:var(--muted)}
 .files-jobs{display:grid;gap:.35rem}
-.files-job{display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;border:1px solid var(--border);border-radius:var(--r-surface)}
+.files-job{display:flex;align-items:center;gap:.6rem;padding:.45rem .7rem}
+.files-more{position:relative;display:inline-flex}
 .files-job.ok .files-ico{color:var(--success)}
 .files-job.bad .files-ico{color:var(--danger)}
 .files-job-main{flex:1;min-width:0;display:grid;gap:.3rem}
@@ -540,12 +536,13 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .adm-search{min-width:100%}
   .adm-search.sm{width:100%}
   .adm-lhead{display:none}
-  .adm-row{grid-template-columns:24px minmax(0,1fr) auto;grid-template-areas:"chk user user" "chk prog acc" "chk act act";column-gap:.6rem;row-gap:.25rem;padding:.5rem .7rem}
+  .adm-row{grid-template-columns:24px minmax(0,1fr) auto;grid-template-areas:"chk user user" "chk role prog" "chk acc act";column-gap:.6rem;row-gap:.25rem;padding:.5rem .7rem}
   .adm-skel{grid-template-columns:24px minmax(0,1fr) 70px;column-gap:.6rem;padding:.5rem .7rem}
   .adm-check{grid-area:chk;align-self:start;margin-top:.55rem}
-  .adm-user{grid-area:user}
-  .adm-row .adm-col-prog{grid-area:prog;text-align:left}
-  .adm-row .adm-col-acc{grid-area:acc;text-align:right}
+  .adm-row .row-name{grid-area:user}
+  .adm-row .adm-col-role{grid-area:role;text-align:left}
+  .adm-row .adm-col-prog{grid-area:prog;text-align:right}
+  .adm-row .adm-col-acc{grid-area:acc;text-align:left}
   .adm-row .adm-col-act{grid-area:act;text-align:right;min-width:0}
   .adm-col-act button{opacity:1}
   .adm-dialog,.adm-dialog.wide{width:94vw}
