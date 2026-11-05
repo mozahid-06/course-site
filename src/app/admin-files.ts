@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
-import { Api, FileListing } from './api';
+import { Api, FileListing, YoutubeLesson } from './api';
 import { UploadJob, Uploader } from './upload';
 
 type Kind = 'file' | 'folder';
@@ -45,6 +45,10 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
               <path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.7L21 8" />
               <path d="M21 3v5h-5" />
             </svg>
+          </button>
+          <button type="button" [disabled]="!path()" [title]="path() ? 'Add a YouTube lesson to this folder' : 'Open a course first'" (click)="openYt()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
+            YouTube
           </button>
           <button type="button" class="p" (click)="picker.click()">
             <svg class="files-up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5" /><path d="m7 10 5-5 5 5" /><path d="M5 19h14" /></svg>
@@ -158,9 +162,28 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
             </div>
           </div>
         }
+        @for (y of ytRows(); track y.id) {
+          <div class="files-row" role="listitem">
+            <span class="files-open as-span">
+              <span class="files-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
+              </span>
+              <span class="files-name">{{ y.name }}</span>
+              <span class="files-meta">video · {{ y.yt }}</span>
+            </span>
+            <div class="files-tools">
+              <button type="button" class="files-tool" title="Change link" aria-label="Change YouTube link" (click)="editYt(y)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
+              </button>
+              <button type="button" class="files-tool danger" title="Delete" aria-label="Delete YouTube lesson" (click)="removeYt(y)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
+              </button>
+            </div>
+          </div>
+        }
       </div>
 
-      @if (!loading() && !listing().dirs.length && !listing().files.length) {
+      @if (!loading() && !listing().dirs.length && !listing().files.length && !ytRows().length) {
         <p class="files-empty">This folder is empty. Drop files here to upload.</p>
       }
 
@@ -206,6 +229,36 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
       </div>
     }
 
+    @if (ytOpen()) {
+      <div class="adm-scrim" (click)="closeYt()"></div>
+      <div class="adm-dialog" role="dialog" aria-modal="true" aria-label="YouTube lesson">
+        <header class="adm-dialog-top">
+          <h3>{{ ytEditing() ? 'Change YouTube link' : 'YouTube lesson' }}</h3>
+          <button type="button" class="adm-close" aria-label="Close" (click)="closeYt()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+          </button>
+        </header>
+        <div class="adm-form">
+          <p class="adm-muted sm">Added to {{ path() }}.</p>
+          @if (!ytEditing()) {
+            <label class="field">
+              <span>Lesson name</span>
+              <input [value]="ytName()" (input)="ytName.set($any($event.target).value)" autocomplete="off" spellcheck="false" />
+            </label>
+          }
+          <label class="field">
+            <span>YouTube link</span>
+            <input [value]="ytLink()" (input)="ytLink.set($any($event.target).value)" placeholder="https://youtu.be/... or the video id" autocomplete="off" spellcheck="false" (keydown.enter)="saveYt()" />
+          </label>
+          @if (ytError()) { <p class="files-error">{{ ytError() }}</p> }
+        </div>
+        <footer class="adm-dialog-foot">
+          <button type="button" (click)="closeYt()">Cancel</button>
+          <button type="button" class="p" [disabled]="busy()" (click)="saveYt()">{{ busy() ? 'Saving...' : ytEditing() ? 'Save' : 'Add lesson' }}</button>
+        </footer>
+      </div>
+    }
+
     <div class="toasts" aria-live="polite">
       @for (t of toasts(); track t.id) {
         <div class="toast" [class.bad]="t.bad" role="status" (click)="dismiss(t.id)">{{ t.text }}</div>
@@ -231,9 +284,24 @@ export class AdminFiles implements OnDestroy {
   protected readonly busy = signal(false);
   protected readonly toasts = signal<Toast[]>([]);
 
+  protected readonly youtube = signal<YoutubeLesson[]>([]);
+  protected readonly ytOpen = signal(false);
+  protected readonly ytEditing = signal<string | null>(null);
+  protected readonly ytName = signal('');
+  protected readonly ytLink = signal('');
+  protected readonly ytError = signal('');
+
   protected readonly crumbs = computed(() => {
     const parts = this.path().split('/').filter(Boolean);
     return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join('/') }));
+  });
+
+  /** YouTube lessons whose parent folder is the folder currently open. */
+  protected readonly ytRows = computed(() => {
+    const here = this.path();
+    return this.youtube()
+      .filter((l) => l.id.slice(0, Math.max(0, l.id.lastIndexOf('/'))) === here)
+      .map((l) => ({ id: l.id, name: l.lesson, yt: l.yt }));
   });
 
   private drags = 0;
@@ -302,7 +370,9 @@ export class AdminFiles implements OnDestroy {
     this.loading.set(true);
     this.error.set('');
     try {
-      this.listing.set(await this.api.listFiles(this.path()));
+      const [listing, youtube] = await Promise.all([this.api.listFiles(this.path()), this.api.listYoutubeLessons()]);
+      this.listing.set(listing);
+      this.youtube.set(youtube);
     } catch (e) {
       this.error.set(message(e));
     } finally {
@@ -419,6 +489,68 @@ export class AdminFiles implements OnDestroy {
 
   protected dismiss(id: number): void {
     this.toasts.update((list) => list.filter((t) => t.id !== id));
+  }
+
+  protected openYt(): void {
+    this.ytEditing.set(null);
+    this.ytName.set('');
+    this.ytLink.set('');
+    this.ytError.set('');
+    this.ytOpen.set(true);
+  }
+
+  protected editYt(y: { id: string; name: string; yt: string }): void {
+    this.ytEditing.set(y.id);
+    this.ytName.set(y.name);
+    this.ytLink.set(y.yt);
+    this.ytError.set('');
+    this.ytOpen.set(true);
+  }
+
+  protected closeYt(): void {
+    this.ytOpen.set(false);
+    this.ytError.set('');
+    this.busy.set(false);
+  }
+
+  protected async saveYt(): Promise<void> {
+    this.ytError.set('');
+    const editing = this.ytEditing();
+    const name = this.ytName().trim();
+    const link = this.ytLink().trim();
+    if (!editing && !name) { this.ytError.set('Give the lesson a name.'); return; }
+    if (name.includes('/')) { this.ytError.set('A name cannot contain a slash.'); return; }
+    if (!link) { this.ytError.set('Paste a YouTube link.'); return; }
+    const full = editing ?? this.join(this.path(), name);
+    const parts = full.split('/');
+    this.busy.set(true);
+    try {
+      const r = await this.api.addYoutubeLesson(parts[0], parts.slice(1, -1).join('/'), parts[parts.length - 1], link);
+      this.ytOpen.set(false);
+      this.toast(r.shadowed ? 'Saved, but a file already uses that path, so it will not show.' : editing ? 'Link updated' : 'Lesson added', r.shadowed);
+      void this.api.init();
+      await this.load();
+    } catch (e) {
+      this.ytError.set(message(e));
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  protected async removeYt(y: { id: string }): Promise<void> {
+    if (!confirm(`Delete the YouTube lesson "${y.id}"?`)) return;
+    this.busy.set(true);
+    this.error.set('');
+    try {
+      await this.api.deleteYoutubeLesson(y.id);
+      this.toast('Deleted');
+      void this.api.init();
+      await this.load();
+    } catch (e) {
+      this.error.set(message(e));
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   private openAsk(ask: Ask, value: string): void {
