@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, output
 import { Api, FileEntry, FileListing, YoutubeLesson } from './api';
 import { CsvReject, CsvRow, parseYoutubeCsv } from './youtube-csv';
 import { UploadJob, Uploader } from './upload';
+import { OptionsMenu } from './options-menu';
 
 type Kind = 'file' | 'folder';
 
@@ -72,6 +73,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
             <svg class="files-up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5" /><path d="m7 10 5-5 5 5" /><path d="M5 19h14" /></svg>
             Upload
           </button>
+          <!-- The header is hidden in admin, so the options menu (Back to course / theme / Sign out) lives here. -->
+          <app-options-menu />
         </div>
       </div>
 
@@ -311,6 +314,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
       }
     </div>
   `,
+  imports: [OptionsMenu],
 })
 export class AdminFiles implements OnDestroy {
   protected readonly api = inject(Api);

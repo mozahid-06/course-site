@@ -23,7 +23,11 @@ export class Shell {
   toggleAdmin(): void {
     this.search.reset();
     this.lessonOpen.set(false);
+    const closing = this.admin();
     this.admin.update((v) => !v);
+    // The admin "Course files" sub-view is kept in the hash; drop it when the panel
+    // closes so returning to the course never leaves a stale #files behind.
+    if (closing && location.hash === '#files') history.pushState(null, '', location.pathname + location.search);
   }
 
   async signOut(): Promise<void> {

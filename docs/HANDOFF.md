@@ -84,8 +84,8 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off; draws no chrome of its own |
 | `src/app/notes-controls.ts` | The shared PDF notes controls (status · full window · hide/show · delete) rendered by both the lesson bar and the resource-PDF modal header |
 | `src/app/lesson-resources.ts` | Lesson Resources tab: admin Link/PDF form, link rows, PDF rows that open the shared viewer in a full-window modal |
-| `src/app/admin.ts` | Admin **Users** view (single heading, one stats line, borderless table) and the user detail dialog; hosts the Files view |
-| `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, YouTube lessons (a toolbar button + rows with change-link/delete + a CSV batch import), and one position box per row |
+| `src/app/admin.ts` | Admin **Users** view (single heading, one stats line, borderless table), the shared options menu, and the user detail dialog; hosts the Files view |
+| `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, YouTube lessons (a toolbar button + rows with change-link/delete + a CSV batch import), one position box per row, and the shared options menu |
 | `src/app/youtube-csv.ts` | Pure CSV parser for the YouTube batch import (`parseYoutubeCsv`, `ytId`); no Angular imports |
 | `src/app/upload.ts` | Uploader: part sizing, presigned PUTs, 3 parallel parts, progress, conflict/retry, resume from `localStorage` after a reload |
 | `src/styles.css` | All styling: tokens, light/dark, shared row/control primitives, desktop + phone layouts |

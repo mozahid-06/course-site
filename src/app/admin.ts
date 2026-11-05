@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, OnInit } from '@angular/core';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
+import { OptionsMenu } from './options-menu';
 
 type SortKey = 'email' | 'progress' | 'courses';
 type RoleFilter = 'all' | 'student' | 'admin';
@@ -55,6 +56,8 @@ const MODES: { key: CourseMode; label: string }[] = [
             </svg>
           </button>
           <button type="button" class="p" (click)="openAdd()">Add users</button>
+          <!-- The header is hidden in admin, so the options menu (Back to course / theme / Sign out) lives here. -->
+          <app-options-menu />
         </div>
       </div>
 
@@ -423,7 +426,7 @@ const MODES: { key: CourseMode; label: string }[] = [
       }
     </div>
   `,
-  imports: [AdminFiles],
+  imports: [AdminFiles, OptionsMenu],
 })
 export class Admin implements OnInit {
   protected readonly api = inject(Api);
