@@ -336,6 +336,12 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .files-head-acts .p{display:inline-flex;align-items:center;gap:.4rem}
 .files-head-acts .p .files-up{stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 
+/* YouTube CSV import preview (Files → YouTube dialog) */
+.yt-import{list-style:none;margin:.2rem 0 0;padding:0;max-height:11rem;overflow:auto;border:1px solid var(--line);border-radius:.5rem}
+.yt-import li{padding:.35rem .6rem;border-top:1px solid var(--line);font-size:.85rem;overflow-wrap:anywhere}
+.yt-import li:first-child{border-top:0}
+.yt-import li.more{color:var(--mute)}
+
 /* Dropping a file anywhere on the panel uploads into the folder that is open */
 .files{position:relative}
 .files-drop{position:absolute;inset:0;z-index:5;display:grid;place-content:center;justify-items:center;gap:.6rem;border-radius:18px;background:color-mix(in srgb,var(--acc) 12%,var(--panel));box-shadow:inset 0 0 0 3px var(--acc-soft),var(--shadow);color:var(--ink);font-weight:600;pointer-events:none;animation:adm-pop .12s ease}

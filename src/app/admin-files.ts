@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Api, FileListing, YoutubeLesson } from './api';
+import { CsvReject, CsvRow, parseYoutubeCsv } from './youtube-csv';
 import { UploadJob, Uploader } from './upload';
 
 type Kind = 'file' | 'folder';
@@ -250,11 +251,25 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
             <span>YouTube link</span>
             <input [value]="ytLink()" (input)="ytLink.set($any($event.target).value)" placeholder="https://youtu.be/... or the video id" autocomplete="off" spellcheck="false" (keydown.enter)="saveYt()" />
           </label>
+          @if (!ytEditing()) {
+            <label class="field">
+              <span>…or import a CSV · name, link</span>
+              <input #csvPicker type="file" accept=".csv,text/csv" (change)="onCsv(csvPicker)" />
+            </label>
+            @if (csvName()) {
+              <p class="adm-muted sm">{{ csvRows().length }} lessons found in {{ csvName() }}@if (csvBad().length) { · {{ csvBad().length }} skipped}.</p>
+              <ul class="yt-import">
+                @for (r of csvPreview(); track $index) { <li>{{ r.name }}</li> }
+                @if (csvRows().length > 8) { <li class="more">…and {{ csvRows().length - 8 }} more</li> }
+              </ul>
+              @if (csvBadSummary()) { <p class="files-error">{{ csvBadSummary() }}</p> }
+            }
+          }
           @if (ytError()) { <p class="files-error">{{ ytError() }}</p> }
         </div>
         <footer class="adm-dialog-foot">
           <button type="button" (click)="closeYt()">Cancel</button>
-          <button type="button" class="p" [disabled]="busy()" (click)="saveYt()">{{ busy() ? 'Saving...' : ytEditing() ? 'Save' : 'Add lesson' }}</button>
+          <button type="button" class="p" [disabled]="busy()" (click)="csvRows().length ? importCsv() : saveYt()">{{ ytCta() }}</button>
         </footer>
       </div>
     }
@@ -290,6 +305,17 @@ export class AdminFiles implements OnDestroy {
   protected readonly ytName = signal('');
   protected readonly ytLink = signal('');
   protected readonly ytError = signal('');
+  protected readonly csvName = signal('');
+  protected readonly csvRows = signal<CsvRow[]>([]);
+  protected readonly csvBad = signal<CsvReject[]>([]);
+  protected readonly csvPreview = computed(() => this.csvRows().slice(0, 8));
+  protected readonly ytCta = computed(() =>
+    this.busy() ? 'Working...'
+      : this.csvRows().length ? `Add ${this.csvRows().length} lesson${this.csvRows().length === 1 ? '' : 's'}`
+        : this.ytEditing() ? 'Save' : 'Add lesson');
+  protected readonly csvBadSummary = computed(() => this.csvBad().length
+    ? `${this.csvBad().length} row${this.csvBad().length === 1 ? '' : 's'} skipped — ${this.csvBad().slice(0, 3).map((b) => `line ${b.line}: ${b.reason}`).join('; ')}`
+    : '');
 
   protected readonly crumbs = computed(() => {
     const parts = this.path().split('/').filter(Boolean);
@@ -497,6 +523,9 @@ export class AdminFiles implements OnDestroy {
     this.ytName.set('');
     this.ytLink.set('');
     this.ytError.set('');
+    this.csvName.set('');
+    this.csvRows.set([]);
+    this.csvBad.set([]);
     this.ytOpen.set(true);
   }
 
@@ -511,6 +540,9 @@ export class AdminFiles implements OnDestroy {
   protected closeYt(): void {
     this.ytOpen.set(false);
     this.ytError.set('');
+    this.csvName.set('');
+    this.csvRows.set([]);
+    this.csvBad.set([]);
     this.busy.set(false);
   }
 
@@ -533,6 +565,55 @@ export class AdminFiles implements OnDestroy {
       await this.load();
     } catch (e) {
       this.ytError.set(message(e));
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  protected async onCsv(input: HTMLInputElement): Promise<void> {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.ytError.set('');
+    try {
+      const { rows, rejected } = parseYoutubeCsv(await file.text());
+      this.csvName.set(file.name);
+      this.csvRows.set(rows);
+      this.csvBad.set(rejected);
+    } catch {
+      this.ytError.set('That file could not be read.');
+    }
+  }
+
+  protected async importCsv(): Promise<void> {
+    const rows = this.csvRows();
+    if (!rows.length) { this.ytError.set('That file had no lessons. Each row needs a name and a YouTube link.'); return; }
+    const parts = this.path().split('/');
+    const course = parts[0];
+    const folder = parts.slice(1).join('/');
+    this.busy.set(true);
+    this.ytError.set('');
+    let added = 0;
+    let shadowed = 0;
+    const failed: string[] = [];
+    try {
+      for (const r of rows) {
+        try {
+          const res = await this.api.addYoutubeLesson(course, folder, r.name, r.link);
+          added++;
+          if (res.shadowed) shadowed++;
+        } catch {
+          failed.push(r.name);
+        }
+      }
+      if (failed.length) {
+        this.ytError.set(`${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
+      } else {
+        this.closeYt();
+        this.toast(shadowed ? `Added ${added} lessons · ${shadowed} hidden by a file with the same path` : `Added ${added} lesson${added === 1 ? '' : 's'}`, shadowed > 0);
+      }
+      void this.api.init();
+      await this.load();
     } finally {
       this.busy.set(false);
     }
