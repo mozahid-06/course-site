@@ -18,7 +18,7 @@ type View =
     <div class="layout">
 
       <!-- Main area -->
-      <main>
+      <main data-scroll-top>
         @if (view(); as v) {
 
           <!-- Breadcrumb (browser mode only) -->
@@ -78,7 +78,7 @@ type View =
                 {{ l.done ? 'Completed' : 'Mark as complete' }}
               </button>
             </div>
-            <div class="player-body">
+            <div class="player-body" data-scroll-top>
               @if (l.kind === 'pdf') {
                 @defer (on immediate) {
                   <app-pdf-viewer [key]="l.id" />
@@ -96,7 +96,7 @@ type View =
                   } @else {
                     <app-player [key]="l.id" (ended)="finish(l)" />
                   }
-                  <app-lesson-panel [lesson]="l" />
+                  <app-lesson-panel data-scroll-top [lesson]="l" />
                 } @placeholder {
                   <div class="defer-fill" aria-live="polite">Loading lesson…</div>
                 } @loading {

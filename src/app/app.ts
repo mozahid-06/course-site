@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
 import { Api, CourseData } from './api';
 import { Login } from './login';
 import { Course } from './course';
@@ -145,6 +145,13 @@ interface LessonHit {
           <div class="defer-fill" role="alert">Could not load your courses. Check your connection and try again.</div>
         }
       }
+
+      <!-- Back to top: appears once any long section (or the page) is scrolled down. -->
+      @if (showTop()) {
+        <button type="button" class="to-top" aria-label="Back to top" (click)="goTop()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+        </button>
+      }
     } @else if (api.me() === null) {
       @defer (on immediate) {
         <app-login />
@@ -165,6 +172,15 @@ export class App {
   private readonly searchToggle = viewChild<ElementRef<HTMLButtonElement>>('searchToggle');
   private returnFocus = false;
 
+  /** True while some long section (or the page) is scrolled down, showing the "back to top" button. */
+  protected readonly showTop = signal(false);
+  /** The scroll container that most recently went past the threshold, if any. */
+  private topTarget: HTMLElement | null = null;
+  private pageScrolled = false;
+  /** Ignore the scroll events produced by our own smooth scroll, so the button doesn't flicker back. */
+  private resetting = false;
+  private resetTimer?: ReturnType<typeof setTimeout>;
+
   constructor() {
     void this.api.init();
     // On a phone the header swaps to the full-width field; move focus with it, and
@@ -179,6 +195,42 @@ export class App {
         this.searchToggle()?.nativeElement.focus();
       }
     });
+    // Scroll events don't bubble, so listen in the capture phase to see every scrollable
+    // section. Only containers marked data-scroll-top (plus the page itself) count.
+    document.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
+    inject(DestroyRef).onDestroy(() => {
+      document.removeEventListener('scroll', this.onScroll, { capture: true });
+      clearTimeout(this.resetTimer);
+    });
+  }
+
+  private readonly onScroll = (e: Event): void => {
+    if (this.resetting) return;
+    const doc = document;
+    const t = e.target;
+    if (t === doc || t === doc.documentElement || t === doc.scrollingElement) {
+      this.pageScrolled = (window.scrollY || doc.documentElement.scrollTop || 0) > 280;
+      this.topTarget = null;
+    } else if (t instanceof HTMLElement && t.dataset['scrollTop'] !== undefined) {
+      this.pageScrolled = false;
+      if (t.scrollTop > 220) this.topTarget = t;
+      else if (this.topTarget === t) this.topTarget = null;
+    } else {
+      return;
+    }
+    this.showTop.set(this.pageScrolled || this.topTarget !== null);
+  };
+
+  /** Scroll the section the button belongs to — or the page — back to the top. */
+  protected goTop(): void {
+    const el = this.topTarget;
+    this.resetting = true;
+    (el ?? window).scrollTo({ top: 0, behavior: 'smooth' });
+    this.topTarget = null;
+    this.pageScrolled = false;
+    this.showTop.set(false);
+    clearTimeout(this.resetTimer);
+    this.resetTimer = setTimeout(() => (this.resetting = false), 800);
   }
 
   /** Matching course titles, shown first so a course name still finds the course. */

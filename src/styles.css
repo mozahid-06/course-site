@@ -157,6 +157,23 @@ button.media-cover{cursor:pointer}
 @media (prefers-reduced-motion:reduce){.media-cover .spin{animation-duration:2.4s}}
 .vw iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#000}
 .wm{position:absolute;z-index:50;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
+/* Wide screens: put the lesson panel beside the player instead of below it, so Discussion /
+   Notes / Resources stay visible without scrolling the video off the top. The panel gets its
+   own scrollbar. Below 1100px (and for the PDF reader, which wants the full area) the original
+   single-column stack is kept. */
+@media (min-width:1100px){
+  .player-body:not(:has(app-pdf-viewer)){display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:minmax(0,1fr);gap:1rem;overflow:hidden}
+  .player-body:not(:has(app-pdf-viewer))>:is(app-player,app-yt-player,app-lesson-panel){min-width:0;min-height:0}
+  .player-body:not(:has(app-pdf-viewer))>app-lesson-panel{overflow-y:auto;overscroll-behavior:contain}
+  .player-body:not(:has(app-pdf-viewer))>.defer-fill{grid-column:1/-1}
+}
+/* "Back to top": one fixed button, shown while any long section (marked data-scroll-top)
+   or the page itself is scrolled down; it scrolls that section back to the top. */
+.to-top{position:fixed;right:clamp(.8rem,3vw,1.6rem);bottom:clamp(.8rem,3vw,1.6rem);z-index:60;display:grid;place-items:center;width:46px;height:46px;padding:0;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc-2));color:var(--on-acc);box-shadow:0 4px 14px rgba(0,0,0,.24);animation:to-top-in .18s ease-out}
+.to-top:hover:not(:disabled){filter:brightness(1.07);background:linear-gradient(135deg,var(--acc),var(--acc-2));box-shadow:0 4px 14px rgba(0,0,0,.24)}
+.to-top svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+@keyframes to-top-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.to-top{animation:none}}
 ngx-extended-pdf-viewer{line-height:normal;display:block}
 ngx-extended-pdf-viewer #toolbarContainer{height:32px!important;padding:0 8px!important;box-sizing:border-box!important}
 ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!important}

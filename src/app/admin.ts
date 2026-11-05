@@ -214,7 +214,7 @@ const MODES: { key: CourseMode; label: string }[] = [
           <button type="button" class="adm-close" aria-label="Close" (click)="closeDrawer()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
         </header>
 
-        <div class="adm-drawer-body">
+        <div class="adm-drawer-body" data-scroll-top>
           <div class="adm-kpis">
             <div><b>{{ u.watched }}</b><span>Lessons watched</span></div>
             <div><b>{{ u.is_admin ? courseList().length : u.courses.length }}</b><span>Courses open</span></div>
