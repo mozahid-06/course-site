@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { YtPlayer } from './yt-player';
@@ -6,6 +6,7 @@ import { PdfViewer } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
 import { Shell } from './shell';
+import { OptionsMenu } from './options-menu';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -14,7 +15,7 @@ type View =
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, YtPlayer, PdfViewer, LessonPanel],
+  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu],
   template: `
     <div class="layout">
 
@@ -24,17 +25,15 @@ type View =
 
           <!-- Breadcrumb (browser mode only) -->
           @if (v.kind === 'browser') {
-            <div class="breadcrumb" role="navigation" aria-label="Location">
-              <span class="bc-sep">./</span>
+            <nav class="breadcrumb" aria-label="Location">
               <button class="bc-btn" (click)="home()">Courses</button>
               <span class="bc-sep">/</span>
               <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.courseTitle }}</button>
-              @if (v.path.length) { <span class="bc-sep">/</span> }
               @for (seg of v.path; track $index; let i = $index) {
+                <span class="bc-sep">/</span>
                 <button class="bc-btn" (click)="goToBreadcrumb(i)">{{ seg }}</button>
-                @if (i < v.path.length - 1) { <span class="bc-sep">/</span> }
               }
-            </div>
+            </nav>
           }
 
           <!-- File browser -->
@@ -68,11 +67,60 @@ type View =
           <!-- Player / PDF viewer -->
           @if (v.kind === 'player' && lesson(); as l) {
             <div class="player-bar">
-              <button class="bc-btn back-btn" (click)="backToBrowser()">
+              <button class="back-btn" (click)="backToBrowser()">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
                 Back
               </button>
               <span class="player-title">{{ l.title }}</span>
+
+              <!-- PDF: the notes controls live in this bar, not a separate row. -->
+              @if (l.kind === 'pdf' && pdfViewer(); as pv) {
+                <div class="notes-controls">
+                  @if (pv.status()) { <span class="notes-status" aria-live="polite">{{ pv.status() }}</span> }
+                  @if (pv.fullWindow()) {
+                    <button type="button" class="notes-btn" (click)="pv.toggleExpanded()"
+                      [attr.aria-label]="pv.expanded() ? 'Exit full window' : 'Full window'"
+                      [title]="pv.expanded() ? 'Exit full window' : 'Full window'">
+                      @if (pv.expanded()) {
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" /></svg>
+                      } @else {
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" /></svg>
+                      }
+                      <span class="lbl">{{ pv.expanded() ? 'Exit full window' : 'Full window' }}</span>
+                    </button>
+                  }
+                  <button type="button" class="notes-btn" (click)="pv.toggleHidden()" [disabled]="!pv.ready()"
+                    [attr.aria-label]="pv.hidden() ? 'Show my notes' : 'Hide my notes'"
+                    [title]="pv.hidden() ? 'Show my notes' : 'Hide my notes'">
+                    @if (pv.hidden()) {
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" />
+                        <circle cx="12" cy="12" r="2.6" />
+                      </svg>
+                    } @else {
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" />
+                        <circle cx="12" cy="12" r="2.6" />
+                        <path d="M3.5 3.5l17 17" />
+                      </svg>
+                    }
+                    <span class="lbl">{{ pv.hidden() ? 'Show my notes' : 'Hide my notes' }}</span>
+                  </button>
+                  <button type="button" class="notes-btn reset" (click)="pv.reset()" [disabled]="!pv.ready()"
+                    aria-label="Delete my notes" title="Delete my notes">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 7h16" />
+                      <path d="M9 7V4.5h6V7" />
+                      <path d="M6.5 7l.9 12.5h9.2L17.5 7" />
+                      <path d="M10 10.5v6M14 10.5v6" />
+                    </svg>
+                    <span class="lbl">Delete notes</span>
+                  </button>
+                </div>
+              }
+
+              <app-options-menu />
+
               <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done" (click)="toggle(l)">
                 @if (l.done) {
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
@@ -86,7 +134,7 @@ type View =
                   <!-- One instance per lesson id: notes and the pending autosave belong to one PDF,
                        so switching documents must destroy the old viewer instead of reusing it. -->
                   @for (id of [l.id]; track id) {
-                    <app-pdf-viewer [key]="id" />
+                    <app-pdf-viewer [key]="id" [showNotes]="false" />
                   }
                 } @placeholder {
                   <div class="defer-fill" aria-live="polite">Loading viewer…</div>
@@ -115,19 +163,22 @@ type View =
           }
 
         } @else {
-          <div class="cards">
+          <div class="list">
+            <h1 class="page-title">Courses</h1>
             @for (c of courseCards(); track c.title) {
-              <button class="card" (click)="openCourse(c)">
-                <span class="course-name">{{ c.title }}</span>
-                <span class="course-count">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
-                <span class="course-bar"><i [style.width.%]="coursePercent(c)"></i></span>
-                <span class="card-go">
-                  {{ courseDone(c) ? 'Continue' : 'Start' }}
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              <button class="course-item" (click)="openCourse(c)">
+                <span class="row-glyph" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
                 </span>
+                <span class="row-name">{{ c.title }}</span>
+                @if (courseTotal(c)) {
+                  <span class="course-bar" aria-hidden="true"><i [style.width.%]="coursePercent(c)"></i></span>
+                }
+                <span class="row-meta">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
+                <span class="row-actions">{{ courseDone(c) ? 'Continue' : 'Start' }}</span>
               </button>
             } @empty {
-              <p class="empty">No courses yet. Ask the admin to give you access.</p>
+              <p class="empty">No courses yet.</p>
             }
           </div>
         }
@@ -177,6 +228,8 @@ export class Course {
   protected home(): void { this.view.set(null); this.activeCourseTitle.set(null); this.search.reset(); }
 
   protected readonly view = signal<View | null>(null);
+  /** The lesson's PDF viewer, so the lesson bar can drive its notes controls. */
+  protected readonly pdfViewer = viewChild(PdfViewer);
   private readonly activeCourseTitle = signal<string | null>(null);
   /**
    * The open course, always read live from Api state. Holding the `CourseData`

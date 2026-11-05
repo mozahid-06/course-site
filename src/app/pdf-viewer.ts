@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { AnnotationEditorLayerRenderedEvent, NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
+import { Theme } from './theme';
 
 // Open fast: stream the file, fetch only the pages being viewed, in larger chunks
 // (default is 64 KB range requests with streaming off, which means many slow round trips).
@@ -31,6 +32,9 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
   imports: [NgxExtendedPdfViewerModule],
   host: { '[class.expanded]': 'expanded()' },
   template: `
+    <!-- The lesson bar carries its own copy of these controls; the resource preview,
+         which has no lesson bar, keeps the inline notes bar. -->
+    @if (showNotes()) {
     <div class="notes-bar">
       <span class="notes-hint">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -80,10 +84,11 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         <span class="lbl">Delete notes</span>
       </button>
     </div>
+    }
     <div class="viewer-wrap">
       <ngx-extended-pdf-viewer
         [src]="url()"
-        [theme]="theme"
+        [theme]="theme()"
         [zoom]="narrow() ? 'page-width' : 'page-fit'"
         [showBorders]="!narrow()"
         [showToolbar]="true"
@@ -125,18 +130,22 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
 export class PdfViewer {
   private readonly api = inject(Api);
   private readonly pdf = inject(NgxExtendedPdfViewerService);
-  protected readonly theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  private readonly themeSvc = inject(Theme);
+  protected readonly theme = computed(() => (this.themeSvc.dark() ? 'dark' : 'light'));
   // Phones and small tablets: a portrait page must fill the width, so page-fit (which fits the
   // whole page into the short viewport) is replaced by page-width and the page borders are dropped.
   private readonly narrowQuery = matchMedia('(max-width: 820px)');
   protected readonly narrow = signal(this.narrowQuery.matches);
   readonly key = input.required<string>();
   readonly fullWindow = input(true);
+  /** The resource preview keeps the inline notes bar; the lesson screen moves it to the lesson bar. */
+  readonly showNotes = input(true);
   protected readonly url = computed(() => this.api.mediaUrl(this.key()));
-  protected readonly expanded = signal(false); // fills the browser window (not the whole screen)
-  protected readonly hidden = signal(false);
-  protected readonly ready = signal(false);
-  protected readonly status = signal('');
+  /** Public so the lesson bar in the parent can drive the viewer. */
+  readonly expanded = signal(false); // fills the browser window (not the whole screen)
+  readonly hidden = signal(false);
+  readonly ready = signal(false);
+  readonly status = signal('');
   private saved: object[] = []; // every note stored on the server for this PDF
   private applying = false; // true while we add/remove notes ourselves, so those events are not saved
   private loadedKey = ''; // the key whose notes are loaded; a new key resets all note state
@@ -164,7 +173,7 @@ export class PdfViewer {
     });
   }
 
-  protected toggleExpanded(): void {
+  toggleExpanded(): void {
     this.expanded.update((v) => !v);
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50); // let the PDF re-fit to the new size
   }
@@ -276,7 +285,7 @@ export class PdfViewer {
     catch (e) { this.status.set((e as Error).message || 'Could not save'); }
   }
 
-  protected async toggleHidden(): Promise<void> {
+  async toggleHidden(): Promise<void> {
     if (!this.hidden()) {
       await this.save(); // keep whatever was just written
       this.hidden.set(true);
@@ -293,7 +302,7 @@ export class PdfViewer {
     }
   }
 
-  protected async reset(): Promise<void> {
+  async reset(): Promise<void> {
     if (!confirm('Delete all your notes on this PDF and go back to the original?')) return;
     clearTimeout(this.timer);
     try {
