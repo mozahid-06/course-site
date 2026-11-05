@@ -584,6 +584,41 @@ const handle = async (req, env) => {
       }
       if (path.startsWith('/api/admin/')) {
         if (!u.is_admin) return json({ error: 'Admins only' }, 403);
+        if (path.startsWith('/api/admin/lesson/') && path.endsWith('/resources/pdf') && m === 'POST') {
+          const key = decodeURIComponent(path.slice('/api/admin/lesson/'.length, -'/resources/pdf'.length));
+          const access = await lessonAccess(env, u, key);
+          if (access !== 'ok') return accessError(access);
+          if (Number(req.headers.get('content-length') || 0) > 26 * 1024 * 1024) return json({ error: 'PDFs must be 25 MB or smaller' }, 413);
+          const form = await req.formData().catch(() => null);
+          const file = form && form.get('file');
+          if (!form || !(file instanceof File)) return json({ error: 'Choose a PDF file' }, 400);
+          if (!/\.pdf$/i.test(file.name || '')) return json({ error: 'Choose a PDF file' }, 400);
+          if (file.size > 25 * 1024 * 1024) return json({ error: 'PDFs must be 25 MB or smaller' }, 413);
+          const head = String.fromCharCode(...new Uint8Array(await file.slice(0, 5).arrayBuffer()));
+          if (head !== '%PDF-') return json({ error: 'That file is not a PDF' }, 400);
+
+          const rawTitle = String(form.get('title') || '').trim();
+          const note = String(form.get('note') || '').trim();
+          let title = rawTitle || String(file.name).replace(/\.pdf$/i, '').trim() || 'PDF';
+          if (title.length > 120) {
+            if (rawTitle) return json({ error: 'Keep the title under 120 characters' }, 400);
+            title = title.slice(0, 120);
+          }
+          if (note.length > 300) return json({ error: 'Keep the note under 300 characters' }, 400);
+
+          const n = await env.DB.prepare('SELECT COUNT(*) n FROM resources WHERE lesson = ?').bind(key).first();
+          if (n.n >= 100) return json({ error: 'This lesson already has 100 resources' }, 400);
+
+          const fileKey = `${courseOf(key)}/_resources/${crypto.randomUUID()}.pdf`;
+          await env.RESOURCES.put(fileKey, await file.arrayBuffer(), { httpMetadata: { contentType: 'application/pdf' } });
+          try {
+            const res = await env.DB.prepare("INSERT INTO resources (lesson, title, url, note, created_by, created, kind, file_key) VALUES (?, ?, '', ?, ?, ?, 'pdf', ?)").bind(key, title, note || null, u.id, Date.now(), fileKey).run();
+            return json({ resource: { id: res.meta.last_row_id, title, url: fileKey, note: note || null, kind: 'pdf' } });
+          } catch (e) {
+            await env.RESOURCES.delete(fileKey).catch(() => {});
+            throw e;
+          }
+        }
         if (path.startsWith('/api/admin/lesson/') && path.endsWith('/resources') && m === 'POST') {
           const key = decodeURIComponent(path.slice('/api/admin/lesson/'.length, -'/resources'.length));
           const access = await lessonAccess(env, u, key);
