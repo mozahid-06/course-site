@@ -22,12 +22,16 @@ course-site/
     styles.css           All styling: tokens, light/dark, desktop + phone layouts
     app/
       api.ts             API client and app state (signals)
-      app.ts             Shell: header (logo, Admin panel toggle, Sign out)
+      app.ts             Shell: slim header (wordmark, search, options menu) + course/admin views
+      shell.ts           Shared shell state (admin/lesson open, header visibility, sign out)
+      options-menu.ts    The single ⋮ menu (Admin panel / Back, theme switch, Sign out)
+      theme.ts           Two-way light/dark switch (localStorage + pre-paint script)
       login.ts           Sign-in form + Google button
-      course.ts          Course cards (home), outline sidebar (folder tree + search), folder browser, lesson view, Mark as complete
+      course.ts          Course list (rows), folder browser, lesson view + bar, Mark as complete
       player.ts          Video player with moving email watermark
       yt-player.ts       YouTube lesson: iframe player with the same moving email watermark
       pdf-viewer.ts      PDF reader with private notes, hide/reset and full-window mode (download and print stay off)
+      notes-controls.ts  Shared PDF notes controls used by the lesson bar and the resource-PDF modal
       admin.ts           Admin panel: list/add/reset password/promote/delete users, give courses
       admin-files.ts     File manager view: folder tree, rename/move/delete, new folder, uploads
       upload.ts          Uploader: presigned parts, progress, resume after a reload

@@ -7,6 +7,7 @@ import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
 import { Shell } from './shell';
 import { OptionsMenu } from './options-menu';
+import { NotesControls } from './notes-controls';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -15,7 +16,7 @@ type View =
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu],
+  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu, NotesControls],
   template: `
     <div class="layout">
 
@@ -67,65 +68,24 @@ type View =
           <!-- Player / PDF viewer -->
           @if (v.kind === 'player' && lesson(); as l) {
             <div class="player-bar">
-              <button class="back-btn" (click)="backToBrowser()">
+              <button class="back-btn" aria-label="Back" (click)="backToBrowser()">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
-                Back
+                <span class="lbl">Back</span>
               </button>
               <span class="player-title">{{ l.title }}</span>
 
-              <!-- PDF: the notes controls live in this bar, not a separate row. -->
+              <!-- PDF: the notes controls are the same shared component the resource modal uses. -->
               @if (l.kind === 'pdf' && pdfViewer(); as pv) {
-                <div class="notes-controls">
-                  @if (pv.status()) { <span class="notes-status" aria-live="polite">{{ pv.status() }}</span> }
-                  @if (pv.fullWindow()) {
-                    <button type="button" class="notes-btn" (click)="pv.toggleExpanded()"
-                      [attr.aria-label]="pv.expanded() ? 'Exit full window' : 'Full window'"
-                      [title]="pv.expanded() ? 'Exit full window' : 'Full window'">
-                      @if (pv.expanded()) {
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" /></svg>
-                      } @else {
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" /></svg>
-                      }
-                      <span class="lbl">{{ pv.expanded() ? 'Exit full window' : 'Full window' }}</span>
-                    </button>
-                  }
-                  <button type="button" class="notes-btn" (click)="pv.toggleHidden()" [disabled]="!pv.ready()"
-                    [attr.aria-label]="pv.hidden() ? 'Show my notes' : 'Hide my notes'"
-                    [title]="pv.hidden() ? 'Show my notes' : 'Hide my notes'">
-                    @if (pv.hidden()) {
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" />
-                        <circle cx="12" cy="12" r="2.6" />
-                      </svg>
-                    } @else {
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" />
-                        <circle cx="12" cy="12" r="2.6" />
-                        <path d="M3.5 3.5l17 17" />
-                      </svg>
-                    }
-                    <span class="lbl">{{ pv.hidden() ? 'Show my notes' : 'Hide my notes' }}</span>
-                  </button>
-                  <button type="button" class="notes-btn reset" (click)="pv.reset()" [disabled]="!pv.ready()"
-                    aria-label="Delete my notes" title="Delete my notes">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M4 7h16" />
-                      <path d="M9 7V4.5h6V7" />
-                      <path d="M6.5 7l.9 12.5h9.2L17.5 7" />
-                      <path d="M10 10.5v6M14 10.5v6" />
-                    </svg>
-                    <span class="lbl">Delete notes</span>
-                  </button>
-                </div>
+                <app-notes-controls [viewer]="pv" />
               }
 
               <app-options-menu />
 
-              <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done" (click)="toggle(l)">
-                @if (l.done) {
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
-                }
-                {{ l.done ? 'Completed' : 'Mark as complete' }}
+              <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done"
+                [attr.aria-label]="l.done ? 'Completed' : 'Mark as complete'"
+                [title]="l.done ? 'Completed' : 'Mark as complete'" (click)="toggle(l)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
+                <span class="lbl">{{ l.done ? 'Completed' : 'Mark as complete' }}</span>
               </button>
             </div>
             <div class="player-body" data-scroll-top>
@@ -134,7 +94,7 @@ type View =
                   <!-- One instance per lesson id: notes and the pending autosave belong to one PDF,
                        so switching documents must destroy the old viewer instead of reusing it. -->
                   @for (id of [l.id]; track id) {
-                    <app-pdf-viewer [key]="id" [showNotes]="false" />
+                    <app-pdf-viewer [key]="id" />
                   }
                 } @placeholder {
                   <div class="defer-fill" aria-live="polite">Loading viewer…</div>

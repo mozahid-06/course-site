@@ -173,8 +173,10 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1rem clamp(1rem
 .back-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .player-title{flex:1;min-width:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .notes-controls{display:flex;align-items:center;gap:.1rem;flex:none}
+app-notes-controls{display:flex;flex:none;min-width:0}
 .notes-status{color:var(--muted);font-size:12.5px;margin-right:.25rem;white-space:nowrap}
 .done-btn{flex:none;min-height:32px;padding:0 .8rem;font-weight:500;white-space:nowrap;border-radius:var(--r-ctl)}
+.done-btn svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .done-btn.is-done{color:var(--success);background:transparent}
 .done-btn.is-done:hover:not(:disabled){background:color-mix(in srgb,var(--danger) 10%,transparent);color:var(--danger)}
 .player-body{flex:1;min-height:0;overflow-y:auto;padding:1rem clamp(.75rem,2vw,1.5rem);display:flex;flex-direction:column;gap:.8rem}
@@ -212,13 +214,10 @@ app-pdf-viewer{display:flex;flex-direction:column;flex:1;min-height:0;height:100
 app-pdf-viewer.expanded{position:fixed;inset:0;z-index:1000;height:auto;background:var(--bg)}
 app-pdf-viewer .viewer-wrap{position:relative;flex:1;min-height:0}
 app-pdf-viewer .viewer-wrap ngx-extended-pdf-viewer{position:absolute;inset:0;height:100%}
-/* Notes bar is kept only for the resource preview; the lesson bar carries its own copy. */
-.notes-bar{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;padding:.35rem .6rem;border-bottom:1px solid var(--border);background:var(--surface);font-size:12.5px}
-.notes-hint{display:flex;align-items:center;gap:.35rem;min-width:0;color:var(--muted);margin-right:auto}
-.notes-bar svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.notes-hint-txt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* PDF notes controls, shared by the lesson bar and the resource-modal header. */
+.notes-controls svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .notes-btn{min-height:28px}
-.notes-bar .reset:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
+.notes-controls .reset:hover:not(:disabled){background:var(--danger-soft);color:var(--danger)}
 app-pdf-viewer #viewerContainer,app-pdf-viewer .zoom{background:var(--bg)}
 app-pdf-viewer #viewerContainer{background:color-mix(in srgb,var(--bg) 90%,var(--text))}
 
@@ -296,8 +295,8 @@ button.lr-link:hover:not(:disabled){background:transparent;text-decoration:under
 button.lr-open{padding:0;background:none;text-align:left;color:var(--link);font-weight:500;min-height:0;display:inline}
 button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 .lr-viewer{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;background:var(--bg)}
-.lr-viewer-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.5rem .75rem;border-bottom:1px solid var(--border);background:var(--surface)}
-.lr-viewer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.lr-viewer-top{display:flex;align-items:center;gap:.5rem;padding:.35rem .6rem;border-bottom:1px solid var(--border);background:var(--surface)}
+.lr-viewer-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .lr-viewer-close{flex:none}
 .lr-viewer>app-pdf-viewer{flex:1;min-height:0;height:auto}
 .lr-viewer-loading{align-items:center;justify-content:center;gap:.6rem;color:var(--muted)}
@@ -413,13 +412,13 @@ button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 
 /* Files */
 .files{display:grid;grid-template-columns:minmax(0,1fr);gap:.6rem;min-width:0;position:relative}
-.files-head{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.files-head{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .files-crumbs{display:flex;align-items:center;gap:.1rem;flex-wrap:wrap;min-width:0}
 .files-crumbs button{padding:.15rem .3rem;background:none;font-size:13.5px;color:var(--muted);border-radius:var(--r-ctl);min-height:0}
 .files-crumbs button:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .files-crumbs button.here{color:var(--link)}
 .files-crumbs svg{width:14px;height:14px;flex:none;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.files-head-acts{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap}
+.files-head-acts{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;margin-left:auto}
 .files-list{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;border-top:1px solid var(--border)}
 .files-row{display:flex;align-items:center;gap:.4rem;min-height:var(--row-h);min-width:0;border-bottom:1px solid var(--border);padding-right:.35rem}
 .files-row:hover{background:var(--hover)}
@@ -508,11 +507,12 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .fb-item{padding:0 .4rem}
   .course-item{padding:0 .4rem}
 
-  /* Player: title may wrap; the primary takes its own row */
-  .player-bar{flex-wrap:wrap;padding:.4rem .8rem;min-height:0;row-gap:.4rem}
-  .player-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .player-bar .done-btn{flex:1 0 100%;width:100%;justify-content:center;min-height:44px}
-  .player-bar .notes-controls{flex-wrap:wrap}
+  /* Player: one compact row. The Back label and the complete label are dropped on
+     phones (aria-label/title remain), so a PDF lesson keeps as much of the screen as
+     possible: the lesson bar + the PDF.js toolbar only. */
+  .player-bar{flex-wrap:nowrap;gap:.15rem .4rem;padding:.35rem .5rem;min-height:0}
+  .player-bar .back-btn span.lbl,.player-bar .done-btn .lbl{display:none}
+  .player-bar .done-btn{flex:0 0 auto;width:40px;min-height:40px;padding:0;justify-content:center}
   .player-body{padding:.6rem .6rem 1rem;gap:.6rem;overflow:visible}
   .vw{border-radius:0;--media-border-radius:0;max-width:none}
   .notes-btn{width:40px;height:40px;min-height:40px;justify-content:center;padding:0!important}

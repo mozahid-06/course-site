@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { Api, Lesson, ResourceItem } from './api';
 import { PdfViewer } from './pdf-viewer';
+import { NotesControls } from './notes-controls';
 
 /** Links and PDFs an admin attached to a lesson; students only ever see the list. */
 @Component({
   selector: 'app-lesson-resources',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [PdfViewer],
+  imports: [PdfViewer, NotesControls],
   template: `
     <div class="lr">
       @if (isAdmin()) {
@@ -93,6 +94,7 @@ import { PdfViewer } from './pdf-viewer';
           <div class="lr-viewer" role="dialog" aria-modal="true" [attr.aria-label]="r.title">
             <header class="lr-viewer-top">
               <span class="lr-viewer-title">{{ r.title }}</span>
+              @if (pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
               <button #closeBtn type="button" class="lr-viewer-close" aria-label="Close PDF" (click)="close()">Close</button>
             </header>
             <app-pdf-viewer [key]="r.url" [fullWindow]="false" />
@@ -124,6 +126,8 @@ export class LessonResources {
   protected readonly mode = signal<'link' | 'pdf'>('link');
   protected readonly file = signal<File | null>(null);
   protected readonly opened = signal<ResourceItem | null>(null);
+  /** The viewer inside the modal, so its header can render the shared notes controls. */
+  protected readonly pdfViewer = viewChild(PdfViewer);
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
   private readonly closeBtn = viewChild<ElementRef<HTMLButtonElement>>('closeBtn');
   private readonly destroyRef = inject(DestroyRef);
