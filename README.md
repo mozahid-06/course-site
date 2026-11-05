@@ -9,7 +9,11 @@ A private video and PDF course site on Cloudflare. Students sign in and watch le
 ```
 course-site/
   wrangler.toml          Worker config; serves the built Angular app from dist/web/browser
-  package.json           Angular + wrangler; `npm run deploy` builds then deploys
+  package.json           Angular + wrangler; `npm run deploy` builds, deploys and sets up uploads
+  scripts/deploy.mjs     Deploy wrapper: account check, build, deploy, bucket + CORS setup, secret check
+  scripts/setup-r2.mjs   Creates the bucket/lifecycle rule and merges the browser-upload CORS rule
+  scripts/doctor.mjs     Diagnoses account, bucket, CORS, lifecycle and secrets (`npm run doctor`)
+  scripts/cloudflare.mjs Helpers shared by the three scripts above
   worker/index.js        API, auth, admin, course listing, media streaming (the Worker)
   worker/files.js        File manager API: listing, folders, move/rename, delete, upload handshake
   worker/youtube.js      YouTube lessons: an optional first-run seed (lessons are managed from the Files view)
@@ -91,7 +95,7 @@ Everything the owner needs for day-to-day content work, without `rclone`:
 - **Delete:** removes the file and its student data; deleting a course also removes its enrollments. If the cleanup is interrupted, running the same delete again finishes it. Deleting a file cannot be undone, and folders require typing the name to confirm.
 - **New folder:** a folder at the top level is a course. An empty folder is held by a hidden zero-byte `.keep`.
 
-Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, optional `R2_BUCKET`) and a bucket CORS rule that exposes `ETag`; both are covered under Deploy. An R2 lifecycle rule on `course-sourse` aborts incomplete multipart uploads after 7 days, so an abandoned upload does not keep paying for parts.
+Uploads need three Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; optional `R2_BUCKET`) and a bucket CORS rule that exposes `ETag`. You do not create the CORS rule by hand — `npm run deploy` adds it for the deployed URL. The same pass creates the bucket and its lifecycle rule (incomplete multipart uploads are aborted after 7 days, so an abandoned upload does not keep paying for parts). Run `npm run doctor` to check all of it.
 
 ## YouTube lessons (no upload)
 
@@ -133,13 +137,32 @@ Option B, HLS (harder to save as a single file): `./tools/make-hls.sh videos hls
 
 ## Deploy (Git auto-deploy)
 
+Uploads go **browser → R2** with presigned URLs, so the bucket must allow the site's address. Nothing here is a manual dashboard step: `npm run deploy` builds, deploys, then creates the bucket (on a fresh account), keeps its multipart cleanup rule, and writes the CORS rule for the URL it just deployed to. It keeps any origins already on the bucket, adds localhost for development, and adds anything in `UPLOAD_ORIGINS`. It also clears a stale Wrangler account cache that could otherwise send commands to the wrong account.
+
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
-2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (Angular build, then `wrangler deploy`). The Worker name must be `course-site`.
+2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (build, deploy and bucket upload setup). The Worker name must be `course-site`.
 3. Workers Builds defaults to Node 24; this repo pins Node `24` in `.nvmrc` and `engines` (Angular 22 needs Node 22.22.3+ or 24.15+). Only set a `NODE_VERSION` build variable if you need to override the default.
-4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. For in-app uploads add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `course-sourse`) and optionally `R2_BUCKET`. Redeploy so the Worker sees them, and add the bucket CORS rule listed in `docs/SECURITY.md` (the browser uploads directly to R2).
+4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. For in-app uploads add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `course-sourse`) and optionally `R2_BUCKET`. Redeploy so the Worker sees them.
 5. Open the site and sign in as the Owner with **Continue with Google** (or `ADMIN_EMAIL` / `ADMIN_PASSWORD` if you set the password), then use **Admin panel** to add students.
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on the first request.
+
+### Upload setup commands
+
+| Command | What it does |
+| --- | --- |
+| `npm run deploy` | Build, deploy, then create/repair the bucket, lifecycle rule and CORS rule for the deployed URL. Warns about missing secrets. |
+| `npm run setup:r2` | Only the bucket/CORS part. Use it after a dashboard-only deploy, or when you attach a custom domain. |
+| `SITE_URL=https://your-site npm run doctor` | Checks the account, bucket, lifecycle rule, CORS origins/methods/`ETag`, secrets and that the site answers. Exits `1` if something uploads need is broken. |
+| `UPLOAD_ORIGINS=https://a.com,https://b.com npm run setup:r2` | Also allow extra origins (custom domains, preview deployments). Existing origins are kept. |
+
+`npm run deploy` reads the deployed `*.workers.dev` URL from Wrangler's output. For a custom domain, pass it explicitly:
+
+```bash
+SITE_URL=https://courses.example.com npm run setup:r2
+```
+
+Cloudflare can take up to ~30 seconds to apply a CORS change. In Workers Builds the build token may not have R2 permission; if the bucket step cannot run there, the deploy still succeeds and prints the one command to run locally. Running `npm run deploy` from your own machine avoids that limitation.
 
 If the site shows an old version after a push, check the **Builds** tab: a failed build leaves the previous version live.
 

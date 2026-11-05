@@ -244,8 +244,8 @@ export class Uploader {
       const settle = () => this.untrack(id, xhr);
       xhr.onload = () => { settle(); xhr.status >= 200 && xhr.status < 300
         ? resolve()
-        : reject(new Error(`R2 refused the upload (${xhr.status}).`)); };
-      xhr.onerror = () => { settle(); reject(new Error('The upload could not reach R2. Check your connection.')); };
+        : reject(new Error(r2Failure(xhr.status))); };
+      xhr.onerror = () => { settle(); reject(new Error(r2Unreachable())); };
       xhr.onabort = () => { settle(); reject(new DOMException('Aborted', 'AbortError')); };
       this.track(id, xhr);
       xhr.send(body);
@@ -261,14 +261,14 @@ export class Uploader {
       const settle = () => this.untrack(id, xhr);
       xhr.onload = () => {
         settle();
-        if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(`R2 refused part (${xhr.status}).`)); return; }
+        if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(r2Failure(xhr.status))); return; }
         const etag = xhr.getResponseHeader('etag') || xhr.getResponseHeader('ETag');
         // Without the CORS expose-header rule the browser hides the ETag and the upload
         // cannot be completed at all, so say exactly that instead of failing obscurely.
-        if (!etag) { reject(new Error('R2 did not expose the part ETag — the bucket CORS rule needs ExposeHeaders: ETag.')); return; }
+        if (!etag) { reject(new Error('R2 did not expose the part ETag, so the upload cannot be finished. The bucket CORS rule needs ExposeHeaders: ETag — run `npm run setup:r2` from the project folder, then retry.')); return; }
         resolve(etag);
       };
-      xhr.onerror = () => { settle(); reject(new Error('The upload could not reach R2. Check your connection.')); };
+      xhr.onerror = () => { settle(); reject(new Error(r2Unreachable())); };
       xhr.onabort = () => { settle(); reject(new DOMException('Aborted', 'AbortError')); };
       this.track(id, xhr);
       xhr.send(body);
@@ -331,4 +331,20 @@ export class Uploader {
     const rest = this.storeAll().filter((r) => r.key !== job.key);
     try { localStorage.setItem(STORE, JSON.stringify(rest)); } catch { /* nothing to do */ }
   }
+}
+
+/**
+ * A failed PUT usually means the bucket CORS rule does not include the site's address
+ * (the browser reports that as a generic network error). Name the cause and the fix
+ * instead of sending people to check their Wi-Fi.
+ */
+function r2Failure(status: number): string {
+  if (status === 403) {
+    return 'R2 refused the upload (403). The bucket CORS rule is most likely missing this site\'s address — run `npm run setup:r2` in the project folder (or ask the site owner to), then retry.';
+  }
+  return `R2 refused the upload (${status}).`;
+}
+
+function r2Unreachable(): string {
+  return 'The upload could not reach R2. If your connection is fine, the bucket CORS rule is missing this site\'s address — run `npm run setup:r2` in the project folder (or ask the site owner to), then retry.';
 }

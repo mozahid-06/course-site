@@ -5,8 +5,11 @@
     "start": "ng serve --host 0.0.0.0 --proxy-config proxy.conf.json",
     "build": "ng build",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "check:scripts": "node --check scripts/cloudflare.mjs && node --check scripts/deploy.mjs && node --check scripts/setup-r2.mjs && node --check scripts/doctor.mjs",
     "api": "wrangler dev --port 8787",
-    "deploy": "ng build && wrangler deploy"
+    "deploy": "node scripts/deploy.mjs",
+    "setup:r2": "node scripts/setup-r2.mjs",
+    "doctor": "node scripts/doctor.mjs"
   },
   "private": true,
   "engines": {
