@@ -594,6 +594,37 @@ const handle = async (req, env) => {
         if (path === '/api/admin/courses' && m === 'GET') {
           return json((await listCourse(env)).map((c) => c.title));
         }
+        if (path === '/api/admin/youtube' && m === 'GET') {
+          const rows = (await env.DB.prepare('SELECT id, yt FROM youtube_lessons ORDER BY id').all()).results;
+          return json(rows.map((r) => {
+            const parts = String(r.id).split('/').filter(Boolean);
+            return { id: r.id, course: parts[0] || '', folder: parts.slice(1, -1).join(' / '), lesson: parts[parts.length - 1] || '', yt: r.yt };
+          }));
+        }
+        if (path === '/api/admin/youtube' && m === 'POST') {
+          const b = await req.json();
+          const course = String(b.course || '').trim();
+          const lesson = String(b.lesson || '').trim();
+          const folder = String(b.folder || '').trim();
+          const yt = ytId(b.link);
+          if (!course || !lesson) return json({ error: 'Course and lesson name are required' }, 400);
+          if (course.includes('/') || lesson.includes('/')) return json({ error: 'Course and lesson name cannot contain "/"' }, 400);
+          if (!yt) return json({ error: 'That is not a YouTube link' }, 400);
+          const parts = [course, ...folder.split('/').map((s) => s.trim()).filter(Boolean), lesson];
+          const id = parts.join('/');
+          await env.DB.prepare('INSERT INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET yt = excluded.yt').bind(id, yt, Date.now()).run();
+          invalidateCourse();
+          const shadowed = !!(await env.RESOURCES.head(id));
+          return json({ ok: true, id, yt, shadowed });
+        }
+        if (path === '/api/admin/youtube' && m === 'DELETE') {
+          const b = await req.json();
+          const id = String(b.id || '').trim();
+          if (!id) return json({ error: 'Missing lesson' }, 400);
+          await env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ?').bind(id).run();
+          invalidateCourse();
+          return json({ ok: true });
+        }
         if (path === '/api/admin/users' && m === 'POST') {
           const b = await req.json();
           const email = String(b.email || '').trim().toLowerCase();
