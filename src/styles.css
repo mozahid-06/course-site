@@ -139,7 +139,7 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.6rem clamp(1r
 .player-body{flex:1;overflow-y:auto;padding:1.2rem clamp(1rem,3vw,2.6rem);display:flex;flex-direction:column;gap:.8rem}
 .row{display:flex;justify-content:space-between;align-items:center;gap:1rem}
 .tools{margin-top:.6rem}
-.vw{position:relative;background:#000;border-radius:var(--r);box-shadow:var(--shadow);--media-accent-color:var(--acc);--media-border-radius:var(--r);--media-font-family:inherit}
+.vw{position:relative;background:#000;border-radius:var(--r);box-shadow:var(--shadow);--media-accent-color:var(--acc);--media-border-radius:var(--r);--media-font-family:inherit;max-width:calc((100vh - var(--head) - 6.25rem) * 16 / 9);margin-inline:auto}
 .vw video-player,.vw video-skin{display:block;width:100%}
 .vw video-skin{aspect-ratio:16/9}
 .vw video-skin>:is(video,youtube-video,hlsjs-video),.vw video-skin>[slot=poster]{width:100%;height:100%;display:block}
@@ -479,7 +479,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .player-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .player-bar>button:last-child{grid-column:1/-1;min-height:44px}
   .player-body{padding:0 0 1.2rem;gap:.8rem;overflow:visible}
-  .vw{border-radius:0;box-shadow:none;--media-border-radius:0}
+  .vw{border-radius:0;box-shadow:none;--media-border-radius:0;max-width:none}
 
   /* auth */
   .login{margin:9vh auto;padding:1.6rem 1.2rem}
