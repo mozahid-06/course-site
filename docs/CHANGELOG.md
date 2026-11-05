@@ -2,12 +2,12 @@
 
 ## Unreleased
 ### Changed (YouTube lessons are now managed in the UI)
-- YouTube lessons now live in the D1 table `youtube_lessons` and are added, edited and deleted from the **Admin panel → YouTube** tab — no code edit, no redeploy. `listCourse` reads the table instead of a module.
+- YouTube lessons now live in the D1 table `youtube_lessons` and are added, edited and deleted from **Admin panel → Files** — the **YouTube** button adds one to the folder you are in, and its lessons show as rows there (change link / delete) — no code edit, no redeploy. `listCourse` reads the table instead of a module. The separate Admin → YouTube tab and `src/app/admin-youtube.ts` were removed.
 - Admin endpoints: `GET/POST/DELETE /api/admin/youtube`. `POST` parses the link (watch/`youtu.be`/`embed`/`shorts`/`live`/bare id), refuses anything else, upserts by path, invalidates the course cache, and returns `shadowed` when a real file already uses the path.
-- `worker/youtube.js` is now only a one-time first-run seed for the table; a lesson deleted in the panel does not come back. New `src/app/admin-youtube.ts` view, wired into the admin header next to Files.
+- `worker/youtube.js` is now only a one-time first-run seed for the table; a lesson deleted in the Files view does not come back.
 
 ### Added (YouTube lessons)
-- Play a YouTube video as a lesson, with no upload: add it from **Admin panel → YouTube** (`"<Course>/<Folder>/<Name>"` + any YouTube link). The link may be a watch/`youtu.be`/`embed`/`shorts`/`live` URL or a bare video id.
+- Play a YouTube video as a lesson, with no upload: add it from **Admin panel → Files** (the **YouTube** button; `"<Course>/<Folder>/<Name>"` + any YouTube link, where the folder you are in is the path). The link may be a watch/`youtu.be`/`embed`/`shorts`/`live` URL or a bare video id.
 - `listCourse` merges those entries into the bucket listing; a YouTube-only course is created automatically and can be granted to students. A real file with the same key wins; a bad link is skipped before anything is created.
 - YouTube lessons use R2-key-shaped ids, so progress, discussion, private notes, resources and enrollments all work unchanged.
 - New `src/app/yt-player.ts` (`<app-yt-player>`): a privacy-friendly `youtube.com/embed` iframe with the moving email watermark; `course.ts` and the header search show a YouTube icon.

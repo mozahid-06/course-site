@@ -51,7 +51,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
 - Names sort naturally, so prefix with `01`, `02`. New uploads appear within about a minute (the listing is cached 60 s per Worker instance).
 - Progress, comments, notes and resources are stored by object key. Rename or move through **Admin panel → Files** and they follow; renaming with rclone or the dashboard does not.
-- **YouTube lessons** are added on top of the bucket listing and managed from **Admin panel → YouTube** (below), so a lesson can exist without a file in R2.
+- **YouTube lessons** are added on top of the bucket listing and managed from **Admin panel → Files** (below), so a lesson can exist without a file in R2.
 
 ## Accounts and the Admin panel
 
@@ -97,15 +97,15 @@ Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRE
 
 A lesson can be a YouTube video instead of a file. This costs nothing and needs no upload, which is the point for lessons already on YouTube.
 
-Add one from the site: sign in as an admin, open **Admin panel → YouTube**, and fill in the form — **Course** (pick an existing one from the list or type a new name), **Folder** (optional; use `/` to nest), **Lesson name**, and the **YouTube link** (any usual link — watch, `youtu.be`, `/embed`, `/shorts`, `/live` — or just the video id). The list below the form shows every YouTube lesson, each with **Edit** (change the link) and **Delete**.
+Add one from the site: sign in as an admin, open **Admin panel → Files**, open the course (and folder) you want, and click **YouTube** in the toolbar. Fill in **Lesson name** and the **YouTube link** (any usual link — watch, `youtu.be`, `/embed`, `/shorts`, `/live` — or just the video id); the folder you are in is the path, so there is no course or folder field. The lesson then appears as a row in that folder, with **Change link** and **Delete**. The button is disabled at the top level — a lesson needs a course, so create (or open) the course folder first.
 
 Lessons are stored in D1 (table `youtube_lessons`), so a change shows up straight away — **no redeploy**.
 
-- A course that only has YouTube lessons is created automatically, so it shows on the home screen and can be granted to students like any other course.
-- If a path names a file that already exists in R2, the real file wins: the form warns you that the lesson will not show, and the listing ignores it (a non-YouTube link is refused before anything is created).
+- A YouTube-only course needs its folder first (**New folder** at the top level), then you add lessons inside it; it then shows on the home screen and can be granted to students like any other course.
+- If a path names a file that already exists in R2, the real file wins: the dialog warns you that the lesson will not show, and the listing ignores it (a non-YouTube link is refused before anything is created).
 - YouTube lessons behave like video lessons: **Mark as complete**, the discussion, private notes and resources all work.
 
-`worker/youtube.js` still exists but only as an **optional first-run seed**: on the first deploy that creates the table, whatever is in it is copied into D1 once, and after that it is ignored (so deleting a lesson in the panel sticks). You never need to edit it.
+`worker/youtube.js` still exists but only as an **optional first-run seed**: on the first deploy that creates the table, whatever is in it is copied into D1 once, and after that it is ignored (so deleting a lesson in the Files view sticks). You never need to edit it.
 
 The player is a plain iframe from `youtube.com/embed` (privacy-friendly, `rel=0` so the end screen stays on the video), with the student's email watermark moving over it, and `public/_headers` allows `youtube.com` / `youtube-nocookie.com` in `frame-src`.
 
