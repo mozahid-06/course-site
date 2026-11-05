@@ -5,6 +5,7 @@ import { YtPlayer } from './yt-player';
 import { PdfViewer } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
+import { Shell } from './shell';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -137,8 +138,11 @@ type View =
 export class Course {
   protected readonly api = inject(Api);
   protected readonly search = inject(LessonSearch);
+  private readonly shell = inject(Shell);
 
   constructor() {
+    // The header is hidden on the lesson player, so tell the shell when a lesson opens.
+    effect(() => { this.shell.lessonOpen.set(this.view()?.kind === 'player'); });
     // Clear a stale query from the header, but keep a pending search request: this
     // component is deferred, so the header is interactive while its chunk loads and
     // a result clicked in that window must still be honoured.

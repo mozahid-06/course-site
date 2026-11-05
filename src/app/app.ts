@@ -4,6 +4,8 @@ import { Login } from './login';
 import { Course } from './course';
 import { Admin } from './admin';
 import { LessonSearch } from './lesson-search';
+import { Shell } from './shell';
+import { OptionsMenu } from './options-menu';
 
 interface LessonHit {
   id: string;
@@ -17,17 +19,18 @@ interface LessonHit {
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Login, Course, Admin],
+  imports: [Login, Course, Admin, OptionsMenu],
   host: {
+    '[class.no-head]': '!shell.headerVisible()',
     '(document:click)': 'onDocClick($event)',
-    '(document:keydown.escape)': 'closeMenu()',
   },
   template: `
     @if (api.me(); as me) {
-      <header [class.searching]="search.expanded()">
-        <h2 class="logo">Course</h2>
+      <!-- The header exists only on the course list and folder browser. -->
+      @if (shell.headerVisible()) {
+        <header [class.searching]="search.expanded()">
+          <h2 class="wordmark">Course</h2>
 
-        @if (!admin()) {
           <div class="head-search">
             <div class="head-field">
               <svg class="head-mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
@@ -92,47 +95,16 @@ interface LessonHit {
               </div>
             }
           </div>
-        }
 
-        <div class="head-actions">
-          @if (me.is_admin) {
-            <button (click)="toggleAdmin()">{{ admin() ? 'Back to course' : 'Admin panel' }}</button>
-          }
-          <button (click)="signOut()">Sign out</button>
-        </div>
+          <app-options-menu />
+        </header>
+      }
 
-        <button
-          type="button"
-          class="head-burger"
-          [attr.aria-label]="menuOpen() ? 'Close account menu' : 'Open account menu'"
-          [attr.aria-expanded]="menuOpen()"
-          (click)="toggleMenu()"
-        >
-          @if (menuOpen()) {
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-          } @else {
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-          }
-        </button>
-
-        <div class="head-menu" [class.open]="menuOpen()" role="menu" aria-label="Account">
-          @if (me.is_admin) {
-            <button type="button" role="menuitem" (click)="toggleAdmin()">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" /></svg>
-              {{ admin() ? 'Back to course' : 'Admin panel' }}
-            </button>
-          }
-          <button type="button" role="menuitem" (click)="signOut()">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v16h-6" /><path d="m10 8-4 4 4 4" /><path d="M6 12h10" /></svg>
-            Sign out
-          </button>
-        </div>
-      </header>
-      @if (admin() && me.is_admin) {
+      @if (shell.admin() && me.is_admin) {
         @defer (on immediate) {
           <app-admin />
         } @placeholder {
-          <div class="defer-fill" aria-live="polite">Loading admin panel…</div>
+          <div class="defer-fill" aria-live="polite">Loading admin panel...</div>
         } @error {
           <div class="defer-fill" role="alert">Could not load the admin panel. Check your connection and try again.</div>
         }
@@ -140,7 +112,7 @@ interface LessonHit {
         @defer (on immediate) {
           <app-course />
         } @placeholder {
-          <div class="defer-fill" aria-live="polite">Loading your courses…</div>
+          <div class="defer-fill" aria-live="polite">Loading your courses...</div>
         } @error {
           <div class="defer-fill" role="alert">Could not load your courses. Check your connection and try again.</div>
         }
@@ -156,7 +128,7 @@ interface LessonHit {
       @defer (on immediate) {
         <app-login />
       } @placeholder {
-        <div class="defer-fill" aria-live="polite">Loading…</div>
+        <div class="defer-fill" aria-live="polite">Loading...</div>
       } @error {
         <div class="defer-fill" role="alert">Could not load the sign-in form. Check your connection and try again.</div>
       }
@@ -166,8 +138,7 @@ interface LessonHit {
 export class App {
   protected readonly api = inject(Api);
   protected readonly search = inject(LessonSearch);
-  protected readonly admin = signal(false);
-  protected readonly menuOpen = signal(false);
+  protected readonly shell = inject(Shell);
   private readonly lessonInput = viewChild<ElementRef<HTMLInputElement>>('lessonQ');
   private readonly searchToggle = viewChild<ElementRef<HTMLButtonElement>>('searchToggle');
   private returnFocus = false;
@@ -265,7 +236,6 @@ export class App {
   });
 
   protected openSearch(): void {
-    this.menuOpen.set(false);
     this.search.open();
   }
 
@@ -286,36 +256,8 @@ export class App {
     this.search.request.set({ course: h.course, lesson: h.id, path: h.path });
   }
 
-  protected toggleMenu(): void {
-    const open = !this.menuOpen();
-    this.menuOpen.set(open);
-    if (open) {
-      this.search.query.set('');
-      this.search.expanded.set(false);
-    }
-  }
-
-  protected closeMenu(): void {
-    this.menuOpen.set(false);
-  }
-
-  protected toggleAdmin(): void {
-    this.menuOpen.set(false);
-    this.search.query.set('');
-    this.search.expanded.set(false);
-    this.admin.set(!this.admin());
-  }
-
   protected onDocClick(e: MouseEvent): void {
     const t = e.target as HTMLElement | null;
-    if (this.menuOpen() && !t?.closest('.head-menu, .head-burger')) this.menuOpen.set(false);
     if (this.search.query() && !t?.closest('.head-search')) this.search.query.set('');
-  }
-
-  protected async signOut(): Promise<void> {
-    this.menuOpen.set(false);
-    this.admin.set(false);
-    this.search.reset();
-    await this.api.logout();
   }
 }
