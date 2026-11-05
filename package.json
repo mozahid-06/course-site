@@ -18,6 +18,8 @@
     "@angular/core": "^22.2.4",
     "@angular/forms": "^22.2.4",
     "@angular/platform-browser": "^22.2.4",
+    "@videojs/html": "^10.3.0",
+    "@videojs/youtube-video": "^10.3.0",
     "aws4fetch": "^1.0.20",
     "hls.js": "^1.7.4",
     "ngx-extended-pdf-viewer": "^31.0.1",
