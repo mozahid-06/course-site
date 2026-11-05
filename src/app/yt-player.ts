@@ -82,13 +82,18 @@ export class YtPlayer {
    * Video.js YouTube media. Its chrome (Share / "Watch on YouTube") is hidden by default.
    * `rel: 0` keeps the end screen from linking away; `origin` + `enablejsapi` let the skin
    * drive the IFrame API. `src` accepts a bare 11-char id or a YouTube URL.
+   * `cc_load_policy: 1` makes YouTube turn its own captions on. With `0`, YouTube still
+   * reports a current track (often the auto-generated one) to the adapter, so the skin looks
+   * as if captions are on, but the iframe paints nothing — and for auto-generated tracks the
+   * adapter's track is not servable, so selecting it via the API cannot recover. YouTube
+   * alone can paint these captions; leaving the policy on is the only reliable switch.
    * The element's `autoplay` attribute starts the lesson immediately, with sound. Browsers can
    * block unmuted autoplay, but the click that opens a lesson normally grants permission; if a
    * browser blocks it, the cover stays and students tap play.
    */
   protected readonly source = computed(() => ({
     src: this.yt(),
-    engine: { youtube: { rel: 0, iv_load_policy: 3, disablekb: 1, cc_load_policy: 0, origin: location.origin, enablejsapi: 1 } },
+    engine: { youtube: { rel: 0, iv_load_policy: 3, disablekb: 1, cc_load_policy: 1, origin: location.origin, enablejsapi: 1 } },
   }));
 
   /**
