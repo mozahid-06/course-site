@@ -1,4 +1,4 @@
-import { CUSTOM_ELEMENTS_SCHEMA, ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
+import { CUSTOM_ELEMENTS_SCHEMA, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import '@videojs/html/video/player';
 import '@videojs/html/video/skin';
 import '@videojs/html/media/hlsjs-video';
@@ -15,26 +15,52 @@ import { Api } from './api';
         <video-skin>
           @if (isHls()) {
             <hlsjs-video
+              #media
               [src]="src()"
               playsinline
               autoplay
               disablepictureinpicture
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"
+              (play)="onPlay()"
+              (playing)="onPlaying()"
+              (timeupdate)="onTimeUpdate($event)"
               (ended)="ended.emit()"
               (contextmenu)="$event.preventDefault()"
             ></hlsjs-video>
           } @else {
             <video
+              #media
               [src]="src()"
               playsinline
               autoplay
               disablepictureinpicture
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"
+              (play)="onPlay()"
+              (playing)="onPlaying()"
+              (timeupdate)="onTimeUpdate($event)"
               (ended)="ended.emit()"
               (contextmenu)="$event.preventDefault()"
             ></video>
+          }
+          <!--
+            Same loading cover as the YouTube player: autoplay makes the skin believe the
+            lesson is already playing, so its control bar shows a pause icon while the media is
+            genuinely still loading. This overlay shows a spinner until playback progresses,
+            then disappears. If the browser blocks autoplay (no play event), it becomes a
+            real play button so one tap starts playback with sound.
+          -->
+          @if (covered()) {
+            @if (blocked()) {
+              <button type="button" class="media-cover" aria-label="Play lesson" (click)="onCoverClick()">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+              </button>
+            } @else {
+              <div class="media-cover" role="status" aria-label="Loading lesson">
+                <span class="spin" aria-hidden="true"></span>
+              </div>
+            }
           }
         </video-skin>
       </video-player>
@@ -59,12 +85,46 @@ export class Player {
    */
   protected readonly supported = typeof customElements !== 'undefined' && !!customElements.get('video-player');
 
+  /** True until the media actually plays, so the loading cover (not a pause icon) is shown. */
+  protected readonly covered = signal(true);
+  /** True when autoplay was blocked (no `play` event) and the cover should offer a play button. */
+  protected readonly blocked = signal(false);
+
+  private readonly media = viewChild<ElementRef<HTMLMediaElement>>('media');
+  private coverTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Autoplay was accepted: keep the spinner and stop the fallback timer. */
+  protected onPlay(): void {
+    this.blocked.set(false);
+    clearTimeout(this.coverTimer);
+  }
+
+  protected onPlaying(): void {
+    this.covered.set(false);
+  }
+
+  protected onTimeUpdate(event: Event): void {
+    if ((event.target as HTMLMediaElement).currentTime > 0.25) this.covered.set(false);
+  }
+
+  /** Fallback when the browser blocked unmuted autoplay: the tap itself authorizes play(). */
+  protected onCoverClick(): void {
+    this.blocked.set(false);
+    void this.media()?.nativeElement.play().catch(() => this.blocked.set(true));
+  }
+
   protected readonly x = signal(10);
   protected readonly y = signal(10);
 
   constructor() {
     const timer = setInterval(() => this.moveMark(), 15000);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    this.coverTimer = setTimeout(() => {
+      if (this.covered()) this.blocked.set(true);
+    }, 3000);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(timer);
+      clearTimeout(this.coverTimer);
+    });
   }
 
   private moveMark(): void {

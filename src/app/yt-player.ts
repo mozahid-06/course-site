@@ -27,17 +27,24 @@ import { Api } from './api';
               Opaque cover for the load window. The skin's own poster hides as soon as the
               media reports "started" — which autoplay sets before the first frame is painted
               — so relying on it lets the YouTube thumbnail/title/red button show while
-              buffering. This cover stays until playback actually progresses.
+              buffering. This cover stays until playback actually progresses, showing a
+              spinner while it loads.
 
-              It is also the fallback play button: some browsers still block unmuted
-              autoplay. A tap is a real user gesture, so play() then succeeds with sound.
-              Being a <button> also means the skin's tap-to-toggle gesture ignores the
-              click, so play() isn't immediately undone.
+              It is also the fallback play button: some browsers block unmuted autoplay (no
+              play event arrives). After a short grace period the spinner becomes a real
+              button, and a tap is a user gesture, so play() then succeeds with sound. Being a
+              <button> also means the skin's tap-to-toggle gesture ignores the click.
             -->
             @if (covered()) {
-              <button type="button" class="yt-cover" aria-label="Play lesson" (click)="onCoverClick()">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
-              </button>
+              @if (blocked()) {
+                <button type="button" class="media-cover" aria-label="Play lesson" (click)="onCoverClick()">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+                </button>
+              } @else {
+                <div class="media-cover" role="status" aria-label="Loading lesson">
+                  <span class="spin" aria-hidden="true"></span>
+                </div>
+              }
             }
           </video-skin>
         </video-player>
@@ -90,10 +97,17 @@ export class YtPlayer {
    */
   protected readonly supported = typeof customElements !== 'undefined' && !!customElements.get('video-player');
 
-  /** True until the video actually plays, so the YouTube embed's own chrome stays hidden. */
+  /**
+   * True until the video actually plays, so the YouTube embed's own chrome stays hidden.
+   * The adapter fires `play` (and reports `paused:false`) while the embed is still buffering,
+   * so only genuine progress (`playing`, or `timeupdate` past 0) hides the cover.
+   */
   protected readonly covered = signal(true);
+  /** True when the lesson has not progressed after a grace period and the cover offers play. */
+  protected readonly blocked = signal(false);
 
   private readonly media = viewChild<ElementRef<HTMLMediaElement>>('media');
+  private coverTimer: ReturnType<typeof setTimeout> | undefined;
 
   protected onPlaying(): void {
     this.covered.set(false);
@@ -105,7 +119,8 @@ export class YtPlayer {
 
   /** Fallback when the browser blocked unmuted autoplay: the tap itself authorizes play(). */
   protected onCoverClick(): void {
-    void this.media()?.nativeElement.play().catch(() => {});
+    this.blocked.set(false);
+    void this.media()?.nativeElement.play().catch(() => this.blocked.set(true));
   }
 
   protected readonly x = signal(10);
@@ -113,7 +128,13 @@ export class YtPlayer {
 
   constructor() {
     const timer = setInterval(() => this.moveMark(), 15000);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    this.coverTimer = setTimeout(() => {
+      if (this.covered()) this.blocked.set(true);
+    }, 4000);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(timer);
+      clearTimeout(this.coverTimer);
+    });
   }
 
   private moveMark(): void {
