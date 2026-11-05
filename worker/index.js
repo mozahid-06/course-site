@@ -688,6 +688,12 @@ const handle = async (req, env) => {
           const b = await req.json();
           const id = String(b.id || '').trim();
           if (!id) return json({ error: 'Missing lesson' }, 400);
+          const pdfs = (await env.DB.prepare('SELECT file_key FROM resources WHERE lesson = ? AND file_key IS NOT NULL').bind(id).all()).results;
+          for (const row of pdfs) {
+            await env.RESOURCES.delete(row.file_key).catch(() => {});
+            await env.DB.prepare('DELETE FROM pdf_notes WHERE lesson = ?').bind(row.file_key).run();
+          }
+          await env.DB.prepare('DELETE FROM resources WHERE lesson = ?').bind(id).run();
           await env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ?').bind(id).run();
           invalidateCourse();
           return json({ ok: true });

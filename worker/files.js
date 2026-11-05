@@ -10,6 +10,7 @@ import { presign, r2Config, s3Fetch } from './s3.js';
 const KEY_MAX = 500;
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
 const NUM = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const courseOf = (key) => String(key).split('/')[0];
 
 const json = (d, status = 200) => new Response(JSON.stringify(d), { status, headers: { 'content-type': 'application/json' } });
 const bad = (error, status = 400) => json({ error }, status);
@@ -53,7 +54,8 @@ async function listFolder(env, prefix) {
     const r = await env.RESOURCES.list({ prefix: base(prefix), delimiter: '/', cursor, limit: 1000 });
     for (const p of r.delimitedPrefixes || []) {
       const full = p.replace(/\/$/, '');
-      if (full) dirs.push({ name: full.split('/').pop(), path: full });
+      if (!full || full.split('/').pop() === '_resources') continue;
+      dirs.push({ name: full.split('/').pop(), path: full });
     }
     for (const o of r.objects) {
       const name = o.key.slice(base(prefix).length);
@@ -88,6 +90,7 @@ const LESSON_ROWS = [
   'UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE watched SET lesson = ? WHERE lesson = ?',
   'UPDATE resources SET lesson = ? WHERE lesson = ?',
+  'UPDATE resources SET file_key = ? WHERE file_key = ?',
 ];
 
 async function listAll(env, prefix) {
@@ -138,6 +141,19 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   // same move again simply finishes it; the per-object check below still refuses a
   // destination key whose copy differs.
   const destKeys = new Set(pairs.map((p) => p.to));
+  // A resource PDF belongs to a course folder, so a lesson that crosses courses needs its
+  // PDFs copied into the destination course's _resources folder too. Course renames already
+  // carry them as ordinary objects, so destKeys keeps this from adding duplicates.
+  for (const p of [...pairs]) {
+    if (!isLessonKey(p.from) || !isLessonKey(p.to) || courseOf(p.from) === courseOf(p.to)) continue;
+    const rows = await env.DB.prepare('SELECT file_key FROM resources WHERE lesson = ? AND file_key IS NOT NULL').bind(p.from).all();
+    for (const row of rows.results || []) {
+      const toKey = `${courseOf(p.to)}/_resources/${row.file_key.split('/').pop()}`;
+      if (destKeys.has(toKey)) continue;
+      pairs.push({ from: row.file_key, to: toKey });
+      destKeys.add(toKey);
+    }
+  }
   const targetObjects = await listAll(env, to + '/');
   if (targetObjects.some((o) => !destKeys.has(o.key))) return bad('Something already exists at ' + to, 409);
   const copies = [];
@@ -234,6 +250,14 @@ async function deleteEntry(env, rawPath, hooks) {
 
   const keys = objects.map((o) => o.key);
   const lessons = new Set([...keys.filter(isLessonKey), ...(await lessonKeysUnder(env, p, single))]);
+  // Resource PDFs live outside the lesson keys, so deleting their lesson must take them too.
+  for (const lessonKey of [...lessons]) {
+    const rows = await env.DB.prepare('SELECT file_key FROM resources WHERE lesson = ? AND file_key IS NOT NULL').bind(lessonKey).all();
+    for (const row of rows.results || []) {
+      if (!keys.includes(row.file_key)) keys.push(row.file_key);
+      lessons.add(row.file_key);
+    }
+  }
   if (!keys.length && !lessons.size) {
     if (p.includes('/') || single) return bad('Not found', 404);
     const enrolled = await env.DB.prepare('SELECT 1 FROM enrollments WHERE course = ? LIMIT 1').bind(p).first();
