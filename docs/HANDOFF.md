@@ -75,7 +75,7 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/api.ts` | `Api` service: fetch wrapper (GET/POST/DELETE) and app state signals (`me`, `courses`); user-admin calls |
 | `src/app/app.ts` | Root: slim header (wordmark, search, options menu) shown only on the course list/browser, switches course/admin views, and the shared "back to top" button |
 | `src/app/shell.ts` | Shared shell state: admin / lesson-open flags, header visibility, sign-out |
-| `src/app/options-menu.ts` | The single `⋮` options menu (Admin panel / Back to course, theme switch, Sign out) |
+| `src/app/options-menu.ts` | The single hamburger options menu (Admin panel / Back to course, theme switch, Sign out), shown in full-contrast text colour in the header, the lesson bar and both admin toolbars |
 | `src/app/theme.ts` | Two-way light/dark controller; mirrors the pre-paint script and writes `localStorage['theme']` |
 | `src/app/login.ts` | Sign-in form |
 | `src/app/course.ts` | Course list (dense rows), folder browser with breadcrumb, lesson view + lesson bar, Mark as complete |

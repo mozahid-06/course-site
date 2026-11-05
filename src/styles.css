@@ -112,6 +112,11 @@ header{display:flex;align-items:center;gap:.6rem;height:var(--head);flex:none;pa
 
 /* One options menu at every size: header, lesson bar and admin all reuse it. */
 app-options-menu{position:relative;display:inline-flex;flex:none}
+/* The menu opener is a hamburger in full-contrast text colour (near-black on light,
+   near-white on dark) so it is always clearly visible, unlike a faint grey ⋮. */
+app-options-menu .icon-btn{color:var(--text)}
+app-options-menu .icon-btn:hover:not(:disabled){color:var(--text)}
+app-options-menu .icon-btn svg{width:18px;height:18px;stroke-width:2.2}
 .menu{position:absolute;right:0;top:calc(100% + 6px);z-index:50;min-width:210px;display:grid;gap:1px;padding:.25rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-surface);box-shadow:0 8px 28px rgba(15,23,42,.16)}
 .menu button{width:100%;justify-content:flex-start;min-height:32px;padding:.3rem .5rem;font-size:14px;text-align:left}
 .menu button svg{width:16px;height:16px;flex:none;fill:none;stroke:var(--muted);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}

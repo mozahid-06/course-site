@@ -24,7 +24,7 @@ course-site/
       api.ts             API client and app state (signals)
       app.ts             Shell: slim header (wordmark, search, options menu) + course/admin views
       shell.ts           Shared shell state (admin/lesson open, header visibility, sign out)
-      options-menu.ts    The single ⋮ menu (Admin panel / Back, theme switch, Sign out)
+      options-menu.ts    The single hamburger menu (Admin panel / Back, theme switch, Sign out)
       theme.ts           Two-way light/dark switch (localStorage + pre-paint script)
       login.ts           Sign-in form + Google button
       course.ts          Course list (rows), folder browser, lesson view + bar, Mark as complete

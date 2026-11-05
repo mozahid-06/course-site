@@ -23,7 +23,7 @@ import { Theme } from './theme';
       (click)="toggle()"
       (keydown.escape)="close()"
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5h.01M12 12h.01M12 19h.01" /></svg>
+      <svg class="menu-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
     </button>
 
     @if (open()) {
