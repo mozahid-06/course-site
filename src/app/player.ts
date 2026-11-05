@@ -21,6 +21,7 @@ import { Api } from './api';
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"
               (ended)="ended.emit()"
+              (contextmenu)="$event.preventDefault()"
             ></hlsjs-video>
           } @else {
             <video
@@ -49,8 +50,10 @@ export class Player {
   protected readonly src = computed(() => this.api.mediaUrl(this.key()));
   protected readonly isHls = computed(() => this.key().endsWith('.m3u8'));
   /**
-   * Defensive fallback: if the Video.js element failed to register, fall back to the
-   * browser's own controls so the lesson still plays.
+   * Fallback for the unlikely case the player element failed to register: the native
+   * `<video>` branch then carries the browser's own controls. HLS cannot fall back to
+   * native playback outside Safari, so a missing HLS element surfaces as the `@defer`
+   * `@error` block in `course.ts` instead.
    */
   protected readonly supported = typeof customElements !== 'undefined' && !!customElements.get('video-player');
 

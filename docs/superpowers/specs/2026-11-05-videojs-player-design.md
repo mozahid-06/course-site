@@ -25,7 +25,8 @@ keeps its own chrome hidden by default, so it drops into a player skin like any
 other media component."* That is the clean-UI behaviour we want, with no overlay
 hacks, and the same library plays self-hosted HLS and MP4.
 
-This supersedes `2026-11-05-plyr-youtube-player-design.md` (marked superseded).
+This supersedes the earlier Plyr-based design (Plyr is deprecated); that spec was
+never adopted and its file was removed.
 
 ## Goals
 
@@ -104,14 +105,17 @@ This supersedes `2026-11-05-plyr-youtube-player-design.md` (marked superseded).
   behind `@if`/`@defer` keyed by the lesson); also update `src` when the input
   changes.
 - **Fallback**: after import, if `customElements.get('video-player')` is
-  undefined (chunk/element failure), render the previous plain `<iframe>` (YouTube)
-  or native `<video>` (self-hosted) so a lesson still plays.
+  undefined (chunk/element failure), YouTube renders the previous plain `<iframe>`
+  and the self-hosted MP4 branch renders a native `<video>` with its own controls.
+  HLS has no cross-browser native fallback, so a missing HLS element surfaces as
+  the `@defer` `@error` message in `course.ts`.
 - **CSP** (`public/_headers`, report-only): add `https://www.youtube.com` to
-  `script-src` (the IFrame API entry) and `https://i.ytimg.com` to `img-src` if
-  the YouTube poster uses it; `frame-src` already allows YouTube. `media-src`,
-  `worker-src`, `style-src` already allow what HLS/MSE needs.
-- **Docs**: mark the Plyr spec superseded; record the dependency + player swap in
-  `docs/HANDOFF.md` §2; add a `docs/CHANGELOG.md` entry.
+  `script-src` (the IFrame API entry). No `i.ytimg.com` entry: `<youtube-video>`
+  renders no poster, so no YouTube image host is needed. `frame-src` already
+  allows YouTube; `media-src`, `worker-src`, `style-src` already allow what
+  HLS/MSE needs.
+- **Docs**: record the dependency + player swap in `docs/HANDOFF.md` §2; add a
+  `docs/CHANGELOG.md` entry.
 
 ## Known limitations (state honestly)
 
@@ -139,9 +143,10 @@ This supersedes `2026-11-05-plyr-youtube-player-design.md` (marked superseded).
   `player` / `yt-player` chunk sizes; assert no Video.js code in `main-*.js`.
 - Local `wrangler dev` with a seeded YouTube lesson and a self-hosted MP4 (and
   HLS if available); real browser (browser-use/CDP): the YouTube lesson shows the
-  Default skin, a poster, **no Share and no "Watch on YouTube"**; play/pause/seek/
+  Default skin, **no Share and no "Watch on YouTube"**; play/pause/seek/
   volume/fullscreen work; the moving watermark is present; the self-hosted MP4
-  plays through the same skin and fires `ended`.
+  plays through the same skin and fires `ended`, and the HLS lesson plays with a
+  visible frame.
 - The harness cannot sustain real YouTube playback (it stalls buffering), so
   verify the UI/DOM states and state the playback limitation honestly rather than
   claiming a watched video.

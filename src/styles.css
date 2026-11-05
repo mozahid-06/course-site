@@ -143,7 +143,6 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.6rem clamp(1r
 .vw video-player,.vw video-skin{display:block;width:100%}
 .vw video-skin{aspect-ratio:16/9}
 .vw video-skin>:is(video,youtube-video,hlsjs-video),.vw video-skin>[slot=poster]{width:100%;height:100%;display:block}
-.vw video-player:fullscreen,.vw video-skin:fullscreen{height:100%;aspect-ratio:auto}
 .vw iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#000}
 .wm{position:absolute;z-index:2;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
 ngx-extended-pdf-viewer{line-height:normal;display:block}
@@ -480,7 +479,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .player-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .player-bar>button:last-child{grid-column:1/-1;min-height:44px}
   .player-body{padding:0 0 1.2rem;gap:.8rem;overflow:visible}
-  .vw{border-radius:0;box-shadow:none}
+  .vw{border-radius:0;box-shadow:none;--media-border-radius:0}
 
   /* auth */
   .login{margin:9vh auto;padding:1.6rem 1.2rem}
