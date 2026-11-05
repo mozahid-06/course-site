@@ -2,7 +2,7 @@ import { CUSTOM_ELEMENTS_SCHEMA, ChangeDetectionStrategy, Component, DestroyRef,
 import '@videojs/html/video/player';
 import '@videojs/html/video/skin';
 import '@videojs/html/media/hlsjs-video';
-import { Api } from './api';
+import { Api, Subtitle } from './api';
 
 /** A self-hosted lesson (HLS or MP4): a Video.js player with the moving email watermark. */
 @Component({
@@ -26,7 +26,11 @@ import { Api } from './api';
               (timeupdate)="onTimeUpdate($event)"
               (ended)="ended.emit()"
               (contextmenu)="$event.preventDefault()"
-            ></hlsjs-video>
+            >
+              @for (t of tracks(); track t.key) {
+                <track kind="subtitles" [attr.src]="mediaUrl(t.key)" [attr.srclang]="t.lang" [attr.label]="t.label" />
+              }
+            </hlsjs-video>
           } @else {
             <video
               #media
@@ -40,7 +44,11 @@ import { Api } from './api';
               (timeupdate)="onTimeUpdate($event)"
               (ended)="ended.emit()"
               (contextmenu)="$event.preventDefault()"
-            ></video>
+            >
+              @for (t of tracks(); track t.key) {
+                <track kind="subtitles" [attr.src]="mediaUrl(t.key)" [attr.srclang]="t.lang" [attr.label]="t.label" />
+              }
+            </video>
           }
           <!--
             Same loading cover as the YouTube player: autoplay makes the skin believe the
@@ -69,12 +77,34 @@ import { Api } from './api';
 export class Player {
   private readonly api = inject(Api);
   readonly key = input.required<string>();
+  readonly subtitles = input<Subtitle[]>([]);
   readonly ended = output<void>();
 
   protected readonly email = computed(() => this.api.me()?.email ?? '');
   /** Same-origin media route; hls.js and the native element both issue range requests. */
   protected readonly src = computed(() => this.api.mediaUrl(this.key()));
   protected readonly isHls = computed(() => this.key().endsWith('.m3u8'));
+
+  /** Same-origin URL for a sidecar track. */
+  protected readonly mediaUrl = (key: string) => this.api.mediaUrl(key);
+
+  /** Human language name; duplicates of the same language get a distinguishing ordinal. */
+  protected readonly tracks = computed(() => {
+    const seen = new Map<string, number>();
+    return this.subtitles().map((s) => {
+      const n = (seen.get(s.lang) ?? 0) + 1;
+      seen.set(s.lang, n);
+      const name = this.label(s.lang);
+      return { ...s, label: n === 1 ? name : `${name} (${n})` };
+    });
+  });
+
+  private label(lang: string): string {
+    // CLDR's display name for `und` is "root", which means nothing to a viewer.
+    if (lang === 'und') return 'Undetermined';
+    try { return new Intl.DisplayNames(undefined, { type: 'language' }).of(lang) || lang.toUpperCase(); }
+    catch { return lang.toUpperCase(); }
+  }
   /**
    * Fallback for the unlikely case the player element failed to register: the native
    * `<video>` branch then carries the browser's own controls. HLS cannot fall back to

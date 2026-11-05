@@ -94,7 +94,7 @@ type View =
                   @if (l.kind === 'youtube') {
                     <app-yt-player [yt]="l.yt || ''" />
                   } @else {
-                    <app-player [key]="l.id" (ended)="finish(l)" />
+                    <app-player [key]="l.id" [subtitles]="l.subtitles ?? []" (ended)="finish(l)" />
                   }
                   <app-lesson-panel data-scroll-top [lesson]="l" />
                 } @placeholder {
