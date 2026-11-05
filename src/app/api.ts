@@ -4,6 +4,7 @@ export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'yo
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
+export interface YoutubeLesson { id: string; course: string; folder: string; lesson: string; yt: string }
 export interface BulkResult { added: { email: string; password?: string }[]; skipped: { email: string; reason: string }[] }
 export interface Me { id: number; email: string; is_admin: number }
 export interface Comment {
@@ -97,6 +98,12 @@ export class Api {
   resetPassword(id: number, password: string): Promise<unknown> { return this.req(`admin/users/${id}/password`, { password }); }
   setRole(id: number, is_admin: boolean): Promise<unknown> { return this.req(`admin/users/${id}/role`, { is_admin }); }
   deleteUser(id: number): Promise<unknown> { return this.req(`admin/users/${id}`, undefined, 'DELETE'); }
+
+  listYoutubeLessons(): Promise<YoutubeLesson[]> { return this.req<YoutubeLesson[]>('admin/youtube'); }
+  addYoutubeLesson(course: string, folder: string, lesson: string, link: string): Promise<{ ok: boolean; id: string; yt: string; shadowed: boolean }> {
+    return this.req('admin/youtube', { course, folder, lesson, link });
+  }
+  deleteYoutubeLesson(id: string): Promise<unknown> { return this.req('admin/youtube', { id }, 'DELETE'); }
 
   getNotes(lesson: string): Promise<{ data: object[] }> { return this.req(`notes/${encodeURIComponent(lesson)}`); }
   saveNotes(lesson: string, data: object[]): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, { data }, 'PUT'); }

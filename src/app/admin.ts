@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal, OnInit } from '@angular/core';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
+import { AdminYoutube } from './admin-youtube';
 
 type SortKey = 'email' | 'progress' | 'courses';
 type RoleFilter = 'all' | 'student' | 'admin';
@@ -37,14 +38,18 @@ const MODES: { key: CourseMode; label: string }[] = [
       <div class="adm-top">
         <div>
           <h1>Admin</h1>
-          <p class="adm-sub">{{ view() === 'files' ? 'Upload, rename, move and delete course files.' : 'Search and filter below; the matching users are listed underneath.' }}</p>
+          <p class="adm-sub">{{ view() === 'files' ? 'Upload, rename, move and delete course files.' : view() === 'youtube' ? 'Add YouTube videos as lessons — nothing is uploaded.' : 'Search and filter below; the matching users are listed underneath.' }}</p>
         </div>
         <div class="adm-top-actions">
-          <button type="button" class="adm-ico wide" [class.on]="view() === 'files'" [attr.aria-pressed]="view() === 'files'" [title]="view() === 'files' ? 'Back to users' : 'Course files'" (click)="toggleView()">
+          <button type="button" class="adm-ico wide" [class.on]="view() === 'files'" [attr.aria-pressed]="view() === 'files'" [title]="view() === 'files' ? 'Back to users' : 'Course files'" (click)="setView('files')">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.5h5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z" />
             </svg>
             <span>Files</span>
+          </button>
+          <button type="button" class="adm-ico wide" [class.on]="view() === 'youtube'" [attr.aria-pressed]="view() === 'youtube'" [title]="view() === 'youtube' ? 'Back to users' : 'YouTube lessons'" (click)="setView('youtube')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
+            <span>YouTube</span>
           </button>
           @if (view() === 'users') {
             <button type="button" class="adm-ico" title="Refresh" aria-label="Refresh list" [disabled]="loading()" (click)="refresh()">
@@ -60,6 +65,8 @@ const MODES: { key: CourseMode; label: string }[] = [
 
       @if (view() === 'files') {
         <app-admin-files />
+      } @else if (view() === 'youtube') {
+        <app-admin-youtube />
       } @else {
       <!-- Overview -->
       <section class="adm-stats" aria-label="Overview">
@@ -431,14 +438,14 @@ const MODES: { key: CourseMode; label: string }[] = [
       }
     </div>
   `,
-  imports: [AdminFiles],
+  imports: [AdminFiles, AdminYoutube],
 })
 export class Admin implements OnInit {
   protected readonly api = inject(Api);
 
   /** Which screen this panel shows. Admin-only either way. */
-  protected readonly view = signal<'users' | 'files'>('users');
-  protected toggleView(): void { this.view.update((v) => (v === 'files' ? 'users' : 'files')); }
+  protected readonly view = signal<'users' | 'files' | 'youtube'>('users');
+  protected setView(v: 'users' | 'files' | 'youtube'): void { this.view.set(this.view() === v ? 'users' : v); }
 
   protected readonly users = signal<AdminUser[]>([]);
   protected readonly loading = signal(true);

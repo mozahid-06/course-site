@@ -248,6 +248,14 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 @keyframes adm-spin{to{transform:rotate(360deg)}}
 .adm-empty{margin:0;padding:1.8rem;text-align:center;color:var(--mute)}
 
+/* Admin → YouTube: the lesson list */
+.yt-list{list-style:none;margin:0;padding:0}
+.yt-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem 1.1rem;border-top:1px solid var(--line)}
+.yt-row:first-child{border-top:0}
+.yt-path{display:grid;gap:.15rem;min-width:0}
+.yt-path b{overflow-wrap:anywhere}
+.yt-actions{display:flex;gap:.4rem;flex:none}
+
 /* Skeleton */
 .adm-skel i{height:14px;border-radius:7px;background:linear-gradient(90deg,var(--panel-2),var(--line),var(--panel-2));background-size:200% 100%;animation:adm-shim 1.2s infinite}
 .adm-skel i:first-child{height:38px;border-radius:50%}
