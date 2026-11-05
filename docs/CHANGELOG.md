@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+### Added (lesson resources)
+- **PDF resources on video and YouTube lessons.** The Resources tab's admin form now switches **Link | PDF**: the PDF is uploaded with an optional note (title defaults to the file name, 25 MB cap, `%PDF-` checked) and listed like a link. A PDF row opens the shared in-app reader in a full-window modal, not a new tab. Resource PDFs are stored in `<Course>/_resources/<uuid>.pdf`, which `listCourse` and the file manager skip, so they never appear as lessons. They reuse `/api/media` and `/api/notes`, so enrollment checks and each student's private annotations are exactly those of a PDF lesson.
+- Deleting a resource removes its PDF and notes; deleting a lesson, section, course or YouTube lesson removes the PDFs of its resources too. Renames rewrite `file_key`, and a cross-course lesson move copies the PDFs into the destination course's `_resources`. Schema: `resources.kind` (`link`/`pdf`) and `resources.file_key`.
+
+### Fixed (PDF viewer)
+- **Saved notes were not shown when a PDF was reopened.** `pagesLoaded` fires before PDF.js renders the annotation editor layer, and `addEditorAnnotation` silently skips notes when that layer does not exist. The viewer now applies stored notes after `annotationEditorLayerRendered`, still once and after the notes request. Affects PDF lessons and resource PDFs.
+
 ### Added (players)
 - **Picture-in-picture works on self-hosted lessons** (HLS and MP4): the skin's own PiP button enters and exits it, and playback keeps its position. YouTube lessons report PiP as unsupported (the adapter cannot hand an iframe to the browser), so the feature is self-hosted only.
 - **Subtitles from tracks already embedded in the source video.** `tools/make-hls.sh` probes each source with `ffprobe` and converts every text subtitle track to WebVTT next to the playlist as `index.<lang>[.<n>].vtt` (`<lang>` lowercased from the stream tag, `und` when absent; duplicate languages get `.2`, `.3`). Extraction runs **before** the "already encoded" skip, so re-running the encoder on an existing lesson adds the `.vtt` files without re-encoding the video; the video encode now passes `-sn` so ffmpeg does not also write stray `index0.vtt` / `index_vtt.m3u8`. Bitmap subtitles (PGS/VobSub) are skipped.

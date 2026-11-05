@@ -1,6 +1,6 @@
 # Handoff: how this project was built and where it stands
 
-For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), lazy loading of the PDF viewer and admin panel, the YouTube lessons feature, the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass, and the picture-in-picture and sidecar-subtitle work on the lesson players.
+For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), lazy loading of the PDF viewer and admin panel, the YouTube lessons feature, the file manager (uploads, rename, move, delete, folders), the admin panel, UI redesign and mobile pass, the picture-in-picture and sidecar-subtitle work on the lesson players, and PDF resources on video lessons.
 
 ## 1. Goal and requirements
 
@@ -31,6 +31,7 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | File manager inside the Admin panel | The owner needed uploads, renames, moves, deletes and folders without rclone. It works on R2 keys directly and carries the D1 rows in the same operation. |
 | Uploads go browser → R2 with presigned S3 URLs | A Worker request body is capped (about 100 MB), so large videos cannot pass through it. The Worker only signs each part; the bytes go straight to the bucket. |
 | Moves copy through the R2 binding, then rewrite D1, then delete | Avoids S3's 5 GiB copy ceiling and works against the local bucket in dev. A retry is safe: an identical copy at the target is treated as already done. |
+| Resource PDFs live in `<Course>/_resources/<uuid>.pdf`, not next to the lesson | A resource is a file the lesson links to, not a lesson. Hiding the folder from `listCourse` and the file manager keeps it out of the course tree, while the existing media/notes routes and enrollment checks work unchanged. One folder per course also gives course rename and cross-course moves an obvious rule: `file_key` is rewritten with the lesson, and a cross-course move copies the PDF to the destination course's `_resources`. |
 | Binding renamed `VIDEOS` → `RESOURCES` | It now holds PDFs and arbitrary files too. The bucket name `course-sourse` is unchanged (R2 buckets cannot be renamed). |
 | D1 for users and progress only | Small relational data; progress keyed by R2 object key. |
 | Schema created lazily by the Worker | The Git deploy has no place to run migrations before the database exists. `CREATE TABLE IF NOT EXISTS` runs once per isolate. |
@@ -78,6 +79,7 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/player.ts` | HLS/MP4 lesson: `<hlsjs-video>` or `<video>` inside the Video.js skin (autoplay, un-muted) with a loading cover (spinner; play button if autoplay is blocked) + moving email watermark |
 | `src/app/yt-player.ts` | YouTube lesson: `<video-player><video-skin><youtube-video>` (autoplay, un-muted) with an opaque loading cover until playback (spinner; play button if autoplay is blocked) + the same moving email watermark |
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off |
+| `src/app/lesson-resources.ts` | Lesson Resources tab: admin Link/PDF form, link rows, PDF rows that open the shared viewer in a full-window modal |
 | `src/app/admin.ts` | Admin panel UI (users and course checkboxes) with a Files/Users toggle |
 | `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, and YouTube lessons (a toolbar button + rows with change-link/delete + a CSV batch import) |
 | `src/app/youtube-csv.ts` | Pure CSV parser for the YouTube batch import (`parseYoutubeCsv`, `ytId`); no Angular imports |
@@ -99,7 +101,7 @@ enrollments (user_id INTEGER, course TEXT, PRIMARY KEY (user_id, course))   -- c
 comments (id INTEGER PK, lesson TEXT, user_id INTEGER, parent_id INTEGER, body TEXT, created INTEGER)   -- lesson = R2 key; replies share the lesson and point at parent_id
 comment_likes (comment_id INTEGER, user_id INTEGER, PRIMARY KEY (comment_id, user_id))
 video_notes (user_id INTEGER, lesson TEXT, body TEXT, updated INTEGER, PRIMARY KEY (user_id, lesson))
-resources (id INTEGER PK, lesson TEXT, title TEXT, url TEXT, note TEXT, created_by INTEGER, created INTEGER)
+resources (id INTEGER PK, lesson TEXT, title TEXT, url TEXT, note TEXT, created_by INTEGER, created INTEGER, kind TEXT, file_key TEXT)   -- kind = 'link' (default) or 'pdf'; for PDFs `url` is empty and `file_key` is the R2 key
 youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)   -- id = lesson path "<Course>/<Folder>/<Name>", yt = YouTube video id; created in migrate() and seeded once from worker/youtube.js
 attempts (k TEXT PRIMARY KEY, n INTEGER, t INTEGER)   -- login throttling
 ```
@@ -118,6 +120,10 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded key>` | session | Own notes for one `.pdf`; every query is scoped to the signed-in user; `403` if the course is not enrolled |
+| `GET /api/lesson/<url-encoded key>/resources` | session | `{resources:[{id,title,url,note,kind}]}`; `url` is the link for `kind:'link'` and the R2 key for `kind:'pdf'`; course-scoped |
+| `POST /api/admin/lesson/<url-encoded key>/resources` | admin | `{title,url,note?}`; adds a link resource |
+| `POST /api/admin/lesson/<url-encoded key>/resources/pdf` | admin | multipart `file`, `title?`, `note?`; `%PDF-` magic, 25 MB cap, title ≤120, note ≤300, 100 resources per lesson; stores `<Course>/_resources/<uuid>.pdf` and returns `{resource}` with `kind:'pdf'` |
+| `DELETE /api/admin/resources/<id>` | admin | Deletes the row, and for a PDF the R2 object and its `pdf_notes` rows |
 | `GET /api/admin/courses` | admin | Course names from `listCourse` |
 | `GET /api/admin/youtube` | admin | `[{id, course, folder, lesson, yt}]` |
 | `POST /api/admin/youtube` | admin | `{course, folder?, lesson, link}`; `ytId` parses the link (`400` if not a YouTube link / course or lesson empty or containing `/`); upserts by path; `invalidateCourse()`; returns `{ok, id, yt, shadowed}` where `shadowed` is true when an R2 object already uses the id |
@@ -145,7 +151,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 ### Course discovery (`listCourse`)
 
 1. List all R2 keys (paginated, 1000 per call); cached in memory for 60 s per isolate. Every file-manager change calls `invalidateCourse()`, so the site reflects it at once. Single-PUT uploads finish entirely in the browser, so the client calls `/api/admin/files/upload/done` afterwards to drop the same cache.
-2. Keep videos (`mp4 webm mkv mov avi m4v m3u8`) and `.pdf`; skip `.ts` segments and root-level files.
+2. Keep videos (`mp4 webm mkv mov avi m4v m3u8`) and `.pdf`; skip `.ts` segments, root-level files, and any key with a `_resources` segment (those are lesson resources, not lessons).
 3. Course = first path segment. Section = remaining directories joined by `" / "` (empty = course root).
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
 5. Sort with a numeric-aware collator.
@@ -248,6 +254,18 @@ Not verified: clicking through the YouTube button/rows in the Files view in a re
 - **App:** `Lesson.subtitles?: Subtitle[]` (`src/app/api.ts`); `Player` takes `subtitles = input<Subtitle[]>([])`, builds `tracks()` with `Intl.DisplayNames` labels (duplicates get ` (2)`, `und` is shown as `Undetermined` because CLDR calls it "root") and renders one `<track kind="subtitles">` per entry inside the media element. No `default` attribute: the viewer enables captions from the skin's button (desktop) or Settings → Captions (below 512px, where `.video-controls-captions-button` is `display:none`). `course.ts` passes `l.subtitles ?? []`.
 - **YouTube:** `src/app/yt-player.ts` passes `cc_load_policy: 1`, which makes YouTube turn its own captions on and paint them (verified on the user-reported ASR-only video and on a normal captioned video). With `0`, YouTube still reports a current track (often auto-generated, with `is_servable:false`) and the adapter marks the skin's track `showing`, so the UI looks enabled while the iframe paints nothing; selecting that track through `setOption('captions','track', …)` cannot recover it. The adapter still calls `setOption` when the viewer changes the skin's track, so turning captions off or picking another language keeps working.
 
+## 4h. PDF resources on video lessons (added later)
+
+- A **video or YouTube** lesson's **Resources** tab can now hold PDFs as well as links. The admin form switches **Link | PDF**; a PDF is uploaded in the same request (`POST /api/admin/lesson/<key>/resources/pdf`, multipart) rather than through the presigned file-manager flow, because it is small (25 MB cap, `%PDF-` magic check) and should become a resource row in one step. The title defaults to the file name; title ≤120 and note ≤300 are enforced by the Worker, and links and PDFs share the existing 100-resource-per-lesson cap.
+- **Storage:** `<Course>/_resources/<uuid>.pdf`. `listCourse` skips any key containing `_resources`, and `worker/files.js` hides the folder from every file-manager listing, so a resource never becomes a lesson and cannot be browsed as content. The media route (`/api/media/<key>`) and the notes route (`/api/notes/<key>`) are reused unchanged, which is what gives resource PDFs exactly the same enrollment checks and per-student private annotations as a PDF lesson.
+- **Client:** `ResourceItem.kind` drives the row (link rows open in a new tab as before; PDF rows open `app-pdf-viewer` in a fixed full-window modal). `PdfViewer` gained `fullWindow` (the modal sets it to `false`, hiding the viewer's own full-window button) and `Api.raw()` for the multipart request. Escape and Close both dismiss the modal and return focus to the row; the modal locks page scroll while open, so the two-column lesson layout behind it does not reflow.
+- **Cleanup/rename:** deleting a resource removes the row, the R2 object and its `pdf_notes`. Deleting a lesson, section, course or YouTube lesson also deletes the PDFs of every resource attached to it (and their notes). `file_key` is rewritten with the lesson on a rename/move, a course rename carries `_resources` as ordinary objects, and a **cross-course** lesson move copies the PDFs into the destination course's `_resources` before the source is deleted. This is the only place the file manager needs to know about resources: `LESSON_ROWS` includes `UPDATE resources SET file_key = ...`.
+- **Notes timing (shared viewer fix):** saved annotations must be applied after PDF.js renders the page's **annotation editor layer**. `pagesLoaded` fires earlier, and `addEditorAnnotation` silently skips notes when no editor layer exists yet, so the viewer now waits for `annotationEditorLayerRendered` (then applies once). This affects PDF lessons too, which is why it was fixed in `pdf-viewer.ts` rather than in the modal.
+
+Verified this session: `npm run typecheck`, `npm run build`, `wrangler deploy --dry-run`; the local access matrix (owner upload to an HLS and a YouTube lesson; a student opens both, highlights, reloads and keeps the annotation; a second student sees empty notes; a non-enrolled student gets `403` on media and notes; link resources still open in a new tab; delete of resource/lesson/YouTube/lesson-file cleans the row, object and `pdf_notes`; the file manager never lists `_resources`; negative checks for non-admin `403`, fake PDF `400`, 26 MB `413`, 101st resource `400`, long title `400`, long note `400`); and a live smoke test on the deployed Worker (upload to a YouTube lesson, student media `200`, highlight survives reload, then cleanup). Test data was removed afterwards.
+
+Not covered: replacing or versioning an already-uploaded PDF (delete and upload again), PDF resources on **PDF** lessons (Resources stays video/YouTube-only), and resumable/direct-to-R2 uploads for PDFs (the 25 MB request-body cap is deliberate).
+
 ## 5. Known limitations and risks
 
 1. A signed-in technical student can still capture or fetch media with their cookie (`yt-dlp`, or the file URL for plain MP4/PDF). No DRM.
@@ -256,6 +274,7 @@ Not verified: clicking through the YouTube button/rows in the Files view in a re
 2b. **No resolution selector.** YouTube no longer lets an embed choose playback quality (`setPlaybackQuality` is a no-op, `setPlaybackQualityRange` is undefined and undocumented); the only working quality menu is YouTube's own chrome, which the player hides. Self-hosted lessons are a single full-resolution rendition (`-crf 23 -preset veryfast`).
 2c. **PiP is self-hosted only** and the email watermark is a DOM overlay, so it does not appear in the PiP window.
 2d. **Existing HLS lessons gain subtitles only by re-running the encoder with the original source file.** The script extracts `.vtt` before the "already encoded" skip, but it can only see files present in `videos/`. Raw MP4/MKV lessons uploaded directly have no encoder step and therefore no subtitles. Bitmap subtitles (PGS/VobSub) are skipped. On phones the captions button is hidden; use Settings → Captions.
+2e. **Resource PDFs cannot be replaced or versioned** — delete the resource and upload the new file (student annotations belong to the old file key and are deleted with it). They are only available on **video and YouTube** lessons, not PDF lessons, and they upload through the Worker, so the cap is 25 MB and there is no resumable/direct-to-R2 path. Resource PDFs have no watermark, like PDF lessons.
 3. HLS segments are not encrypted; protection is the session cookie only.
 4. Login lockout exists, but there is no Cloudflare WAF/bot protection configured; see `docs/SECURITY.md`.
 5. No password change by the student, no self-service reset, no "disable" (only delete).
