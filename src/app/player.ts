@@ -19,7 +19,6 @@ import { Api } from './api';
               [src]="src()"
               playsinline
               autoplay
-              disablepictureinpicture
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"
               (play)="onPlay()"
@@ -34,7 +33,6 @@ import { Api } from './api';
               [src]="src()"
               playsinline
               autoplay
-              disablepictureinpicture
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"
               (play)="onPlay()"
