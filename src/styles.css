@@ -162,10 +162,10 @@ button.media-cover{cursor:pointer}
    own scrollbar. Below 1100px (and for the PDF reader, which wants the full area) the original
    single-column stack is kept. */
 @media (min-width:1100px){
-  .player-body:not(:has(app-pdf-viewer)){display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:minmax(0,1fr);gap:1rem;overflow:hidden}
-  .player-body:not(:has(app-pdf-viewer))>:is(app-player,app-yt-player,app-lesson-panel){min-width:0;min-height:0}
-  .player-body:not(:has(app-pdf-viewer))>app-lesson-panel{overflow-y:auto;overscroll-behavior:contain}
-  .player-body:not(:has(app-pdf-viewer))>.defer-fill{grid-column:1/-1}
+  .player-body:not(:has(> app-pdf-viewer)){display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:minmax(0,1fr);gap:1rem;overflow:hidden}
+  .player-body:not(:has(> app-pdf-viewer))>:is(app-player,app-yt-player,app-lesson-panel){min-width:0;min-height:0}
+  .player-body:not(:has(> app-pdf-viewer))>app-lesson-panel{overflow-y:auto;overscroll-behavior:contain}
+  .player-body:not(:has(> app-pdf-viewer))>.defer-fill{grid-column:1/-1}
 }
 /* "Back to top": one fixed button, shown while any long section (marked data-scroll-top)
    or the page itself is scrolled down; it scrolls that section back to the top. */
@@ -531,7 +531,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
 @media(max-width:380px){header button{padding:.35rem .5rem!important;font-size:.78rem}.logo{font-size:1.15rem}header div{gap:.3rem}}
 
 /* PDF reader: fill the lesson area */
-.player-body:has(app-pdf-viewer){padding:0;overflow:hidden}
+.player-body:has(> app-pdf-viewer){padding:0;overflow:hidden}
 app-pdf-viewer{display:flex;flex-direction:column;flex:1;min-height:0;height:100%}
 app-pdf-viewer.expanded{position:fixed;inset:0;z-index:1000;height:auto;background:var(--bg)}
 app-pdf-viewer .viewer-wrap{position:relative;flex:1;min-height:0}
@@ -559,8 +559,8 @@ app-pdf-viewer #viewerContainer{background:color-mix(in srgb,var(--bg) 90%,var(-
 @media(max-width:760px){
   /* A PDF needs the whole remaining screen: pin the layout to the viewport and let the
      viewer take whatever the player bar leaves (no magic offsets, no dead space below). */
-  .layout:has(app-pdf-viewer){height:calc(100dvh - var(--head));overflow:hidden}
-  .player-body:has(app-pdf-viewer){height:auto;min-height:0}
+  .layout:has(.player-body > app-pdf-viewer){height:calc(100dvh - var(--head));overflow:hidden}
+  .player-body:has(> app-pdf-viewer){height:auto;min-height:0}
 }
 
 /* Mark as complete */
@@ -627,7 +627,9 @@ button.dc-link:hover:not(:disabled){background:transparent;box-shadow:none;text-
 /* Resources */
 .lr{display:grid;gap:.8rem}
 .lr-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.5rem;padding:.8rem;border-radius:14px;background:var(--panel-2)}
-.lr-form input:nth-of-type(3),.lr-form button{grid-column:1/-1}
+.lr-form input:nth-of-type(3),.lr-form button.p{grid-column:1/-1}
+.lr-mode{grid-column:1/-1;justify-self:start}
+.lr-form input[type=file]{padding:.45rem .5rem;font-size:.82rem}
 .lr-form button.p{justify-self:start;min-width:140px}
 .lr-list{list-style:none;display:grid;gap:.5rem;margin:0;padding:0}
 .lr-item{display:flex;align-items:flex-start;gap:.7rem;padding:.7rem .8rem;border-radius:14px;background:var(--panel-2)}
@@ -644,6 +646,15 @@ button.lr-del:hover:not(:disabled){background:color-mix(in srgb,var(--bad) 14%,t
 .lr-error{margin:0;color:var(--bad);font-size:.88rem}
 button.lr-link{padding:.1rem 0;background:transparent;box-shadow:none;color:var(--acc);font-size:.82rem;font-weight:600;border-radius:6px}
 button.lr-link:hover:not(:disabled){background:transparent;box-shadow:none;text-decoration:underline}
+.lr-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+button.lr-open{padding:0;background:none;box-shadow:none;text-align:left;font:inherit;color:var(--acc);font-weight:650;border-radius:0;overflow-wrap:anywhere}
+button.lr-open:hover:not(:disabled){background:none;box-shadow:none;text-decoration:underline}
+.lr-viewer{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;background:var(--bg)}
+.lr-viewer-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem .8rem;border-bottom:1px solid var(--line);background:var(--panel)}
+.lr-viewer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
+.lr-viewer-close{flex:none}
+.lr-viewer>app-pdf-viewer{flex:1;min-height:0;height:auto}
+.lr-viewer-loading{align-items:center;justify-content:center;gap:.6rem;color:var(--mute)}
 
 @media(max-width:760px){
   .lp{margin:0 .8rem;border-radius:16px}
