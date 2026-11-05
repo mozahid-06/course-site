@@ -147,7 +147,7 @@ const validPw = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200
 //   <Course>/<Section>/<file>        → course with a section containing a lesson
 //   <Course>/<Section>/<Sub>/...     → deeper sub-folders treated as nested sections
 const VIDEO_EXT = /\.(mp4|webm|mkv|mov|avi|m4v|m3u8)$/i;
-const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4' };
+const MEDIA_TYPES = { m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', vtt: 'text/vtt', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime', avi: 'video/x-msvideo', m4v: 'video/mp4' };
 let cache = { at: 0, data: null };
 // Called after any admin file change so the site reflects it immediately instead of
 // waiting out the 60 s window below.
@@ -170,6 +170,15 @@ async function listCourse(env) {
     keys.push(...r.objects.map((o) => o.key)); cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
 
+  // Sidecar subtitles: <Lesson>/index.<lang>[.<n>].vtt belongs to that folder's HLS lesson.
+  const subtitleMap = new Map();
+  for (const key of keys) {
+    const m = /^(.+)\/index\.([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.\d+)?\.vtt$/.exec(key);
+    if (!m) continue;
+    if (!subtitleMap.has(m[1])) subtitleMap.set(m[1], []);
+    subtitleMap.get(m[1]).push({ key, lang: m[2] });
+  }
+
   // courses: Map<courseName, Map<sectionName, lesson[]>>
   // files directly under course root go into section '' (no section)
   const courses = new Map();
@@ -188,7 +197,12 @@ async function listCourse(env) {
     if (!courses.has(courseName)) courses.set(courseName, new Map());
     const secs = courses.get(courseName);
     if (!secs.has(sectionName)) secs.set(sectionName, []);
-    secs.get(sectionName).push({ id: key, title, kind: pdf ? 'pdf' : 'video' });
+    const lesson = { id: key, title, kind: pdf ? 'pdf' : 'video' };
+    if (file === 'index.m3u8') {
+      const subs = subtitleMap.get(key.slice(0, key.lastIndexOf('/')));
+      if (subs) lesson.subtitles = subs.sort((a, b) => NUM.compare(a.lang, b.lang) || NUM.compare(a.key, b.key));
+    }
+    secs.get(sectionName).push(lesson);
   }
 
   // YouTube lessons managed from the Admin panel (D1). The id is a path like an R2
@@ -271,7 +285,7 @@ function mediaRequestOk(req, env) {
 }
 // 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user per hour (per Worker instance).
 const seen = new Map();
-const lessonOf = (key) => (/\.(m3u8|ts)$/i.test(key) ? key.slice(0, key.lastIndexOf('/')) : key);
+const lessonOf = (key) => (/\.(m3u8|ts|vtt)$/i.test(key) ? key.slice(0, key.lastIndexOf('/')) : key);
 function scraping(env, u, key) {
   if (u.is_admin) return false;
   const now = Date.now();
@@ -304,7 +318,7 @@ function reserve(env, u, bytes) {
 }
 
 async function serve(req, env, key, u) {
-  const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v)$/i.test(key);
+  const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
   if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
   if (scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
   const isVideo = VIDEO_FILE.test(key);

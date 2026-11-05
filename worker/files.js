@@ -59,7 +59,7 @@ async function listFolder(env, prefix) {
       const name = o.key.slice(base(prefix).length);
       if (!name || name.includes('/') || name === '.keep') continue;
       if (!prefix) continue; // root-level strays are not lessons and cannot be managed here
-      if (/\.ts$/i.test(name)) continue; // part of an HLS lesson, not its own row
+      if (/\.(ts|vtt)$/i.test(name)) continue; // parts of the HLS lesson, not rows of their own
       files.push({
         key: o.key,
         name,
