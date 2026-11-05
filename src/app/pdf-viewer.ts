@@ -40,16 +40,18 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         <span class="notes-hint-txt">{{ narrow() ? 'Private to you' : 'Your notes are private. Only you can see them.' }}</span>
       </span>
       <span class="notes-status">{{ status() }}</span>
-      <button type="button" class="notes-btn" (click)="toggleExpanded()"
-        [attr.aria-label]="expanded() ? 'Exit full window' : 'Full window'"
-        [title]="expanded() ? 'Exit full window' : 'Full window'">
-        @if (expanded()) {
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" /></svg>
-        } @else {
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" /></svg>
-        }
-        <span class="lbl">{{ expanded() ? 'Exit full window' : 'Full window' }}</span>
-      </button>
+      @if (fullWindow()) {
+        <button type="button" class="notes-btn" (click)="toggleExpanded()"
+          [attr.aria-label]="expanded() ? 'Exit full window' : 'Full window'"
+          [title]="expanded() ? 'Exit full window' : 'Full window'">
+          @if (expanded()) {
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" /></svg>
+          } @else {
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M15 20h5v-5M9 20H4v-5" /></svg>
+          }
+          <span class="lbl">{{ expanded() ? 'Exit full window' : 'Full window' }}</span>
+        </button>
+      }
       <button type="button" class="notes-btn" (click)="toggleHidden()" [disabled]="!ready()"
         [attr.aria-label]="hidden() ? 'Show my notes' : 'Hide my notes'"
         [title]="hidden() ? 'Show my notes' : 'Hide my notes'">
@@ -128,6 +130,7 @@ export class PdfViewer {
   private readonly narrowQuery = matchMedia('(max-width: 820px)');
   protected readonly narrow = signal(this.narrowQuery.matches);
   readonly key = input.required<string>();
+  readonly fullWindow = input(true);
   protected readonly url = computed(() => this.api.mediaUrl(this.key()));
   protected readonly expanded = signal(false); // fills the browser window (not the whole screen)
   protected readonly hidden = signal(false);

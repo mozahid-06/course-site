@@ -12,7 +12,7 @@ export interface Comment {
   id: number; parent_id: number | null; body: string; created: number;
   name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;
 }
-export interface ResourceItem { id: number; title: string; url: string; note: string | null }
+export interface ResourceItem { id: number; title: string; url: string; note: string | null; kind: 'link' | 'pdf' }
 export interface DirEntry { name: string; path: string }
 export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean }
 export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[] }
@@ -35,6 +35,13 @@ export class Api {
       headers: { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
+    return data as T;
+  }
+
+  private async raw<T>(path: string, init: RequestInit): Promise<T> {
+    const res = await fetch('/api/' + path, init);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
     return data as T;
@@ -128,6 +135,13 @@ export class Api {
   resources(key: string): Promise<{ resources: ResourceItem[] }> { return this.req(this.lessonPath(key, 'resources')); }
   addResource(key: string, r: { title: string; url: string; note?: string }): Promise<{ resource: ResourceItem }> {
     return this.req(`admin/${this.lessonPath(key, 'resources')}`, r);
+  }
+  uploadResourcePdf(key: string, file: File, title?: string, note?: string): Promise<{ resource: ResourceItem }> {
+    const form = new FormData();
+    form.append('file', file);
+    if (title) form.append('title', title);
+    if (note) form.append('note', note);
+    return this.raw(`admin/${this.lessonPath(key, 'resources')}/pdf`, { method: 'POST', body: form });
   }
   deleteResource(id: number): Promise<unknown> { return this.req(`admin/resources/${id}`, undefined, 'DELETE'); }
 
