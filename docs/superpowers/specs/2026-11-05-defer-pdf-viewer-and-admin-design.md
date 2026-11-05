@@ -1,7 +1,7 @@
 # Defer the PDF viewer and admin panel — design
 
 Date: 2026-11-05
-Status: proposed
+Status: implemented
 
 ## Intent (why)
 

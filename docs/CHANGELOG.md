@@ -2,7 +2,9 @@
 
 ## Unreleased
 ### Changed (lazy loading)
-- The PDF viewer (`ngx-extended-pdf-viewer`) and the admin panel are now **lazy chunks** loaded with Angular `@defer`, so they are no longer in the initial bundle. The PDF viewer's on-idle warm-up is now a dynamic `import()` — a static `prefetchPdfAssets` import (same module as the viewer) was what pinned the library into the entry bundle. Initial JS transfer drops from ~215 kB to ~80 kB; the `pdf-viewer` chunk (~126 kB) is warmed on idle, while the `admin` chunk (~16 kB) is fetched only for admins.
+- The PDF viewer (`ngx-extended-pdf-viewer`) and the admin panel are **lazy chunks** loaded with Angular `@defer`, so they are no longer in the initial bundle. The PDF viewer's on-idle warm-up is now a dynamic `import()` — a static `prefetchPdfAssets` import (same module as the viewer) was what pinned the library into the entry bundle.
+- A second pass extends the same treatment across the site: the **lesson area** (`player`, `yt-player`, `lesson-panel` + discussion/resources), **login** and the **course shell** are lazy chunks too. Every deferred block has a layout-matched placeholder, an `@error` fallback and `aria-live`, so a slow or failed chunk shows a message rather than a blank pane.
+- Initial JS transfer drops from ~215 kB to ~66 kB. The `pdf-viewer` chunk (~126 kB) is warmed on idle; `admin` (~16 kB), `course` (~3 kB) and `login` (~1.3 kB) load with their view; the lesson chunks load when a lesson opens.
 
 ### Added (YouTube CSV import)
 - Add many YouTube lessons at once: in the Files → YouTube dialog, choose a **CSV** (`name,link` per row; a header row and extra columns like a `No,Date,Title,URL` export are accepted — the link column is detected by its YouTube URL and the name is the column to its left). The dialog previews the found and skipped rows, then **Add N lessons** adds them all into the current folder and updates any name that already exists. The file never leaves the browser; new pure module `src/app/youtube-csv.ts`; no Worker change.

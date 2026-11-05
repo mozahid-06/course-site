@@ -40,7 +40,7 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | Angular 22 (upgraded from 21) | The reason to hold at 21 (Workers Builds had an older Node) is gone: the build image now defaults to Node 24, which Angular 22 supports. Angular 22 makes `OnPush` the default change detection strategy, so the `ng update` migration added `ChangeDetectionStrategy.Eager` to every existing component to keep behaviour unchanged; new components can use the OnPush default. |
 | No router, no UI library | One screen after login; fewer dependencies. |
 | `ngx-extended-pdf-viewer` | Gives a full PDF reader. Print, download, open, rotate etc. are hidden in `pdf-viewer.ts`. |
-| Lazy-load the PDF viewer and admin panel | The app shipped one initial bundle; `@defer` splits the two heavy conditional chunks (~135 kB transfer) out of it. A static `prefetchPdfAssets` import pinned the PDF library into the entry bundle, so the on-idle warm-up became a dynamic `import()` instead. No router (see above); the same pattern extends to the rest of the site later. |
+| Lazy-load the PDF viewer, admin panel, lesson area, login and course shell | The app shipped one initial bundle; `@defer` splits every conditional view out of it (initial transfer ~215 kB → ~66 kB). A static `prefetchPdfAssets` import pinned the PDF library into the entry bundle, so the on-idle warm-up became a dynamic `import()` instead. No router (see above); every block has a layout-matched placeholder, `@error` and `aria-live`. |
 | Native video controls and fullscreen | A custom fullscreen button was tried (to keep the watermark visible) and removed at the owner's request. Trade-off: no watermark in native fullscreen. |
 | Passwords: PBKDF2-SHA256, 100,000 iterations | The maximum Web Crypto allows in Workers. |
 | Optimistic "Mark as complete" | `Api.setDone` updates the UI first and rolls back if the request fails. |
@@ -225,10 +225,11 @@ Not verified: clicking through the YouTube button/rows in the Files view in a re
 
 ## 4e. Lazy loading (added later)
 
-- The PDF viewer and the admin panel are lazy chunks loaded with Angular `@defer` (in `course.ts` and `app.ts`) instead of riding in the initial bundle. Initial JS transfer is ~80 kB (was ~215 kB).
+- Every conditional view is a lazy chunk loaded with Angular `@defer`: the PDF viewer and the admin panel (in `course.ts` / `app.ts`), then in a second pass the lesson area (`player`, `yt-player`, `lesson-panel` + discussion/resources), `login` and the `course` shell. Initial JS transfer went ~215 kB → ~66 kB.
 - The PDF viewer warms on idle via a **dynamic** `import('./pdf-viewer')`. A static import of `prefetchPdfAssets` — which lives in the same module as the viewer, and so pulls in `ngx-extended-pdf-viewer` — is what kept the whole library in the entry chunk; that is the trap to remember when deferring anything else. The reader tuning in `pdf-viewer.ts` (`disableStream`, `disableAutoFetch`, `rangeChunkSize`) still runs when the lazy module loads, before the viewer initialises.
-- Both use `@defer (on immediate)` with a minimal placeholder. The admin block has **no prefetch**, so a student never fetches admin code; the PDF block is fine to warm for everyone.
-- Not verified: opening a PDF and the admin panel in a real browser (no browser harness in this environment). Check the Network tab after deploy: the `pdf-viewer` chunk is warmed on idle, so it normally appears without opening a PDF; the `admin` chunk must never appear for a non-admin.
+- All blocks use `@defer (on immediate)` with a layout-matched `.defer-fill` placeholder, an `@error` fallback and `aria-live="polite"`. No block prefetches, so a student never fetches admin code and a course list never fetches the lesson or PDF code; the PDF chunk is warmed on idle for everyone (as before).
+- Angular splits per deferred dependency, so the lesson area became separate `player` / `yt-player` / `lesson-panel` chunks rather than one.
+- Not verified: opening a PDF, a lesson and the admin panel in a real browser (no browser harness in this environment). Check the Network tab after deploy: the `pdf-viewer` chunk is warmed on idle, so it normally appears without opening a PDF; the `admin` chunk must never appear for a non-admin.
 
 ## 5. Known limitations and risks
 
