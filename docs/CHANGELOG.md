@@ -6,7 +6,7 @@
 - Deleting a resource removes its PDF and notes; deleting a lesson, section, course or YouTube lesson removes the PDFs of its resources too. Renames rewrite `file_key`, and a cross-course lesson move copies the PDFs into the destination course's `_resources`. Schema: `resources.kind` (`link`/`pdf`) and `resources.file_key`.
 
 ### Fixed (PDF viewer)
-- **Saved notes were not shown when a PDF was reopened.** `pagesLoaded` fires before PDF.js renders the annotation editor layer, and `addEditorAnnotation` silently skips notes when that layer does not exist. The viewer now applies stored notes after `annotationEditorLayerRendered`, still once and after the notes request. Affects PDF lessons and resource PDFs.
+- **Saved notes were not shown when a PDF was reopened.** `pagesLoaded` fires before PDF.js renders the annotation editor layer, and `addEditorAnnotation` silently skips notes when that layer does not exist. The viewer now restores each page's notes after that page's `annotationEditorLayerRendered` event (so notes on later pages restore on scroll), merges not-yet-rendered saved notes into every save so an edit cannot delete them, and uses a fresh viewer instance per PDF id so switching lessons cannot reuse another document's note state. Affects PDF lessons and resource PDFs.
 
 ### Added (players)
 - **Picture-in-picture works on self-hosted lessons** (HLS and MP4): the skin's own PiP button enters and exits it, and playback keeps its position. YouTube lessons report PiP as unsupported (the adapter cannot hand an iframe to the browser), so the feature is self-hosted only.
