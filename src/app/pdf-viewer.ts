@@ -116,6 +116,7 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         [enableDragAndDrop]="false"
         [contextMenuAllowed]="false"
         (pagesLoaded)="onLoaded()"
+        (annotationEditorLayerRendered)="onEditorLayer()"
         (annotationEditorEvent)="onEdit()"
       ></ngx-extended-pdf-viewer>
     </div>
@@ -138,6 +139,9 @@ export class PdfViewer {
   protected readonly status = signal('');
   private saved: object[] = []; // what is stored on the server
   private applying = false; // true while we add/remove notes ourselves, so those events are not saved
+  private editorLayerReady = false; // notes can only be added after PDF.js has rendered the editor layer
+  private notesReady = false;
+  private notesApplied = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
@@ -186,9 +190,23 @@ export class PdfViewer {
   protected async onLoaded(): Promise<void> {
     try {
       this.saved = (await this.api.getNotes(this.key())).data;
-      await this.apply(this.saved);
     } catch { this.status.set('Could not load your notes'); }
+    this.notesReady = true;
     this.ready.set(true);
+    if (this.editorLayerReady) await this.applySaved();
+  }
+
+  // The editor layer is rendered after `pagesLoaded`, and adding notes before that is silently
+  // skipped (PDF.js has no layer to deserialize them into), so wait for the layer itself.
+  protected onEditorLayer(): void {
+    this.editorLayerReady = true;
+    if (this.notesReady) void this.applySaved();
+  }
+
+  private async applySaved(): Promise<void> {
+    if (this.notesApplied) return;
+    this.notesApplied = true;
+    await this.apply(this.saved);
   }
 
   protected onEdit(): void {
