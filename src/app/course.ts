@@ -134,7 +134,11 @@ export class Course {
   protected readonly search = inject(LessonSearch);
 
   constructor() {
-    this.search.reset();
+    // Clear a stale query from the header, but keep a pending search request: this
+    // component is deferred, so the header is interactive while its chunk loads and
+    // a result clicked in that window must still be honoured.
+    this.search.query.set('');
+    this.search.expanded.set(false);
     // Warm the PDF viewer chunk and its worker scripts in the background once the
     // page is idle, so the first PDF opens without waiting on the (now lazy) viewer.
     const idle = (window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
