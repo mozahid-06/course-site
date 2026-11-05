@@ -47,7 +47,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
             </svg>
           </button>
           <button type="button" [disabled]="!path()" [title]="path() ? 'Add a YouTube lesson to this folder' : 'Open a course first'" (click)="openYt()">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
+            <svg class="files-yt" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
             YouTube
           </button>
           <button type="button" class="p" (click)="picker.click()">
