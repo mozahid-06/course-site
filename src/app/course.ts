@@ -130,7 +130,7 @@ export class Course {
       this.search.request.set(null);
       const course = this.api.courses().find((c) => c.title === req.course);
       if (!course) return;
-      this.activeCourse.set(course);
+      this.activeCourseTitle.set(course.title);
       this.search.query.set('');
       this.search.expanded.set(false);
       if (req.lesson) {
@@ -143,10 +143,19 @@ export class Course {
     });
   }
 
-  protected home(): void { this.view.set(null); this.activeCourse.set(null); this.search.reset(); }
+  protected home(): void { this.view.set(null); this.activeCourseTitle.set(null); this.search.reset(); }
 
   protected readonly view = signal<View | null>(null);
-  protected readonly activeCourse = signal<CourseData | null>(null);
+  private readonly activeCourseTitle = signal<string | null>(null);
+  /**
+   * The open course, always read live from Api state. Holding the `CourseData`
+   * object itself goes stale, because `Api.setDone` replaces course objects
+   * immutably — the file list would then miss the "completed" checkmark.
+   */
+  protected readonly activeCourse = computed<CourseData | null>(() => {
+    const title = this.activeCourseTitle();
+    return title ? this.api.courses().find((c) => c.title === title) ?? null : null;
+  });
 
   // Items to show in the browser at the current path
   protected readonly browserItems = computed(() => {
@@ -188,7 +197,7 @@ export class Course {
   });
 
   protected openCourse(c: CourseData): void {
-    this.activeCourse.set(c);
+    this.activeCourseTitle.set(c.title);
     this.search.query.set('');
     this.search.expanded.set(false);
     this.view.set({ kind: 'browser', courseTitle: c.title, path: [] });
