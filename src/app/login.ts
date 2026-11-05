@@ -23,8 +23,14 @@ function loadGsi(): Promise<void> {
   template: `
     <form class="login" (ngSubmit)="submit()">
       <h1>Sign in</h1>
-      <input name="email" type="email" placeholder="Email" autocomplete="username" [(ngModel)]="email" required />
-      <input name="password" type="password" placeholder="Password" autocomplete="current-password" [(ngModel)]="password" required />
+      <label class="field">
+        <span>Email</span>
+        <input name="email" type="email" placeholder="you@example.com" autocomplete="username" [(ngModel)]="email" required />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input name="password" type="password" placeholder="Your password" autocomplete="current-password" [(ngModel)]="password" required />
+      </label>
       <p class="err" role="alert">{{ error() }}</p>
       <button class="p" [disabled]="busy()">Sign in</button>
       <div class="or" [hidden]="!hasGoogle()"><span>or</span></div>
