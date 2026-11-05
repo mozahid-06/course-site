@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, u
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { YtPlayer } from './yt-player';
-import { PdfViewer, prefetchPdfAssets } from './pdf-viewer';
+import { PdfViewer } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
 
@@ -80,7 +80,13 @@ type View =
             </div>
             <div class="player-body">
               @if (l.kind === 'pdf') {
-                <app-pdf-viewer [key]="l.id" />
+                @defer (on immediate) {
+                  <app-pdf-viewer [key]="l.id" />
+                } @placeholder {
+                  <p class="empty">Loading viewer…</p>
+                } @loading {
+                  <p class="empty">Loading viewer…</p>
+                }
               } @else if (l.kind === 'youtube') {
                 <app-yt-player [yt]="l.yt || ''" />
                 <app-lesson-panel [lesson]="l" />
@@ -118,9 +124,10 @@ export class Course {
 
   constructor() {
     this.search.reset();
-    // Fetch the PDF viewer scripts in the background once the page is idle.
+    // Warm the PDF viewer chunk and its worker scripts in the background once the
+    // page is idle, so the first PDF opens without waiting on the (now lazy) viewer.
     const idle = (window as any).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1500));
-    idle(() => prefetchPdfAssets());
+    idle(() => { void import('./pdf-viewer').then((m) => m.prefetchPdfAssets()); });
     // A student with a single course goes straight into it
     effect(() => { const cs = this.api.courses(); if (cs.length === 1 && !untracked(() => this.view())) this.openCourse(cs[0]); });
     // The header search can jump to a course or a lesson from anywhere in the app.
