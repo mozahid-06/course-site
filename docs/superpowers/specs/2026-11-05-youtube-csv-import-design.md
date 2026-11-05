@@ -38,8 +38,9 @@ and detected**, so extra columns are simply ignored.
 Rules:
 
 1. Parse every row into cells.
-2. Drop the first row if it looks like a header (it contains no YouTube link
-   anywhere).
+2. Drop the first row if it looks like a header (it contains no YouTube **URL** —
+   a bare video id is not enough here, because a header word such as `Youtube` is
+   at least six id-like characters and would otherwise read as one).
 3. Find the **link column**: the column whose cells are most often YouTube links.
 4. The **name column** is the column immediately to the left of the link column
    (or to the right, when the link is column 0).

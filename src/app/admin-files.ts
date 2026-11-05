@@ -269,7 +269,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
         </div>
         <footer class="adm-dialog-foot">
           <button type="button" (click)="closeYt()">Cancel</button>
-          <button type="button" class="p" [disabled]="busy()" (click)="csvRows().length ? importCsv() : saveYt()">{{ ytCta() }}</button>
+          <button type="button" class="p" [disabled]="busy()" (click)="csvLoaded() ? importCsv() : saveYt()">{{ ytCta() }}</button>
         </footer>
       </div>
     }
@@ -308,11 +308,13 @@ export class AdminFiles implements OnDestroy {
   protected readonly csvName = signal('');
   protected readonly csvRows = signal<CsvRow[]>([]);
   protected readonly csvBad = signal<CsvReject[]>([]);
+  protected readonly csvLoaded = computed(() => this.csvName() !== '');
   protected readonly csvPreview = computed(() => this.csvRows().slice(0, 8));
   protected readonly ytCta = computed(() =>
     this.busy() ? 'Working...'
       : this.csvRows().length ? `Add ${this.csvRows().length} lesson${this.csvRows().length === 1 ? '' : 's'}`
-        : this.ytEditing() ? 'Save' : 'Add lesson');
+        : this.csvLoaded() ? 'Add lessons'
+          : this.ytEditing() ? 'Save' : 'Add lesson');
   protected readonly csvBadSummary = computed(() => this.csvBad().length
     ? `${this.csvBad().length} row${this.csvBad().length === 1 ? '' : 's'} skipped — ${this.csvBad().slice(0, 3).map((b) => `line ${b.line}: ${b.reason}`).join('; ')}`
     : '');
@@ -587,7 +589,12 @@ export class AdminFiles implements OnDestroy {
 
   protected async importCsv(): Promise<void> {
     const rows = this.csvRows();
-    if (!rows.length) { this.ytError.set('That file had no lessons. Each row needs a name and a YouTube link.'); return; }
+    if (!rows.length) {
+      this.ytError.set(this.csvBad().length
+        ? `Every row was skipped — ${this.csvBadSummary()}`
+        : 'That file had no lessons. Each row needs a name and a YouTube link.');
+      return;
+    }
     const parts = this.path().split('/');
     const course = parts[0];
     const folder = parts.slice(1).join('/');

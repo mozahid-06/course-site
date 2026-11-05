@@ -9,19 +9,28 @@
  * optional leading UTF-8 BOM. Columns are detected rather than fixed, so extra
  * columns (a row number, a date) are simply ignored: the link column is the one
  * whose cells are most often YouTube links, and the name is the column just to
- * its left (to its right, when the link is the first column).
+ * its left (to its right, when the link is the first column). A header row is
+ * optional and is detected by holding no YouTube *URL* (a bare video id can look
+ * like a header word).
  */
 
 export interface CsvRow { name: string; link: string; yt: string }
 export interface CsvReject { line: number; reason: string }
 
+/** The URL part of a YouTube link (watch, youtu.be, /embed, /shorts, /live). */
+const YT_URL = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{6,})/;
+const BARE_ID = /^[A-Za-z0-9_-]{6,}$/;
+
+/** True when the text is a YouTube URL (as opposed to a bare video id). */
+function isYoutubeUrl(s: string): boolean { return YT_URL.test(String(s ?? '').trim()); }
+
 /** The video id in any usual YouTube link (watch, youtu.be, /embed, /shorts, /live), or a bare id. */
 export function ytId(link: string): string | null {
   const s = String(link ?? '').trim();
   if (!s) return null;
-  const m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{6,})/.exec(s);
+  const m = YT_URL.exec(s);
   if (m) return m[1];
-  return /^[A-Za-z0-9_-]{6,}$/.test(s) ? s : null;
+  return BARE_ID.test(s) ? s : null;
 }
 
 /** Split CSV text into rows of cells (RFC-4180), dropping a leading BOM. */
@@ -64,7 +73,10 @@ function splitCsv(text: string): string[][] {
 export function parseYoutubeCsv(text: string): { rows: CsvRow[]; rejected: CsvReject[] } {
   const all = splitCsv(text).filter((cells) => cells.some((c) => c.trim() !== ''));
   if (!all.length) return { rows: [], rejected: [] };
-  const header = !all[0].some((c) => ytId(c));
+  // A header row holds no YouTube *URL*. A bare video id is not enough: a header
+  // word such as "Youtube" is >= 6 id-like characters and would otherwise be
+  // read as one, so only a real URL (watch/youtu.be/embed/shorts/live) counts here.
+  const header = !all[0].some((c) => isYoutubeUrl(c));
   const data = header ? all.slice(1) : all;
   if (!data.length) return { rows: [], rejected: [] };
 
