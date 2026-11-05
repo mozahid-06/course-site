@@ -27,7 +27,7 @@ A full Content-Security-Policy is shipped in **report-only** mode (it logs viola
 - The `R2_*` secrets are optional: without them everything except uploads still works, and uploads answer `503`.
 
 ### Media (videos and PDFs)
-- Every request needs the session cookie **and an enrolled course**: students only get media, notes and the course list for the courses an admin gave them (admins get all), checked on every request in the Worker.
+- Every request needs the session cookie **and an enrolled course**: students only get media, notes and the course list for the courses an admin gave them (admins get all), checked on every request in the Worker. `GET /api/order` applies the same rule to the saved position map, so it reveals nothing about courses the student cannot see.
 - Every request needs the session cookie.
 - **Browser-only gate:** the Worker requires `Sec-Fetch-Site: same-origin` and a media-type `Sec-Fetch-Dest`. Browsers send these automatically; `curl`, `wget`, `yt-dlp` and most download managers do not, and other websites cannot fake them. Opening a media URL in the address bar, an iframe or a new tab is refused. `Cross-Origin-Resource-Policy: same-origin` stops hotlinking.
 - **Scrape limit:** a student can open at most 20 distinct lessons per hour (admins exempt; `MAX_LESSONS_PER_HOUR` to change). Grabbing a whole course in one go gets `429`.

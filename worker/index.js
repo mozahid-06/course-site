@@ -57,6 +57,10 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS video_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, body TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS resources (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, note TEXT, created_by INTEGER NOT NULL, created INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS idx_resources_lesson ON resources(lesson, created)',
+  // Admin-chosen order for folders, files and YouTube lessons. A path without a row keeps
+  // the default order (folders, then files, then YouTube; each by name). Positions are
+  // per parent folder, so moving an item to another folder drops its old number.
+  'CREATE TABLE IF NOT EXISTS content_order (path TEXT PRIMARY KEY, position INTEGER NOT NULL)',
 ];
 let ready;
 // The owner comes from the Cloudflare secret ADMIN_EMAIL: the row is created on the first
@@ -225,11 +229,30 @@ async function listCourse(env) {
     secs.get(sectionName).push({ id, title: parts[parts.length - 1], kind: 'youtube', yt: row.yt });
   }
 
-  const data = [...courses].sort((a, b) => NUM.compare(a[0], b[0])).map(([courseName, secs]) => {
-    const sections = [...secs].sort((a, b) => NUM.compare(a[0], b[0])).map(([sectionName, lessons]) => ({
-      title: sectionName || null,
-      lessons: lessons.sort((a, b) => NUM.compare(a.title, b.title)),
-    }));
+  const positions = new Map(
+    (await env.DB.prepare('SELECT path, position FROM content_order').all()).results
+      .map((r) => [String(r.path), Number(r.position)]),
+  );
+  // Numbered items come first, in their saved order; unnumbered ones keep the default
+  // order (folders before files at the same level, then by name).
+  const ordered = (aPath, aName, bPath, bName) => {
+    const pa = positions.get(aPath);
+    const pb = positions.get(bPath);
+    if (pa != null && pb != null) return pa - pb || NUM.compare(aName, bName);
+    if (pa != null) return -1;
+    if (pb != null) return 1;
+    return NUM.compare(aName, bName);
+  };
+  const sectionPath = (courseName, sectionName) =>
+    sectionName ? `${courseName}/${sectionName.split(' / ').join('/')}` : courseName;
+
+  const data = [...courses].sort((a, b) => ordered(a[0], a[0], b[0], b[0])).map(([courseName, secs]) => {
+    const sections = [...secs]
+      .sort((a, b) => ordered(sectionPath(courseName, a[0]), a[0], sectionPath(courseName, b[0]), b[0]))
+      .map(([sectionName, lessons]) => ({
+        title: sectionName || null,
+        lessons: lessons.sort((a, b) => ordered(a.id, a.title, b.id, b.title)),
+      }));
     return { title: courseName, sections };
   });
   cache = { at: Date.now(), data };
@@ -438,6 +461,18 @@ const handle = async (req, env) => {
             lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
           })),
         })));
+      }
+      // Position numbers the student browser shows: path -> number. Only courses this
+      // student can see are included, so it leaks nothing about other courses.
+      if (path === '/api/order') {
+        const mine = await myCourses(env, u);
+        const rows = (await env.DB.prepare('SELECT path, position FROM content_order').all()).results || [];
+        const order = {};
+        for (const row of rows) {
+          const key = String(row.path);
+          if (!mine || mine.has(key.split('/')[0])) order[key] = Number(row.position);
+        }
+        return json(order);
       }
       if (path.startsWith('/api/media/')) {
         const key = decodeURIComponent(path.slice(11));
@@ -695,6 +730,7 @@ const handle = async (req, env) => {
           }
           await env.DB.prepare('DELETE FROM resources WHERE lesson = ?').bind(id).run();
           await env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ?').bind(id).run();
+          await env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(id).run();
           invalidateCourse();
           return json({ ok: true });
         }

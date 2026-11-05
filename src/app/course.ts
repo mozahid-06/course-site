@@ -41,6 +41,7 @@ type View =
             <div class="browser">
               @for (item of browserItems(); track item.id) {
                 <button class="fb-item" (click)="onItemClick(item)">
+                  <span class="fb-pos" aria-hidden="true">{{ item.index }}</span>
                   <span class="fb-icon" aria-hidden="true">
                     @if (item.kind === 'folder') {
                       <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
@@ -114,7 +115,7 @@ type View =
 
         } @else {
           <div class="cards">
-            @for (c of api.courses(); track c.title) {
+            @for (c of courseCards(); track c.title) {
               <button class="card" (click)="openCourse(c)">
                 <span class="course-name">{{ c.title }}</span>
                 <span class="course-count">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
@@ -183,6 +184,21 @@ export class Course {
     return title ? this.api.courses().find((c) => c.title === title) ?? null : null;
   });
 
+  // Courses in the admin's order first, then the rest alphabetically. The server already
+  // sorts this list, but the positions can change while the course list is cached.
+  protected readonly courseCards = computed<CourseData[]>(() => {
+    const order = this.api.order();
+    const name = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    return [...this.api.courses()].sort((a, b) => {
+      const pa = order[a.title];
+      const pb = order[b.title];
+      if (pa != null && pb != null) return pa - pb || name.compare(a.title, b.title);
+      if (pa != null) return -1;
+      if (pb != null) return 1;
+      return name.compare(a.title, b.title);
+    });
+  });
+
   // Items to show in the browser at the current path
   protected readonly browserItems = computed(() => {
     const v = this.view();
@@ -190,10 +206,11 @@ export class Course {
     if (!v || v.kind !== 'browser' || !course) return [];
 
     const currentPath = v.path; // e.g. [] = course root, ['Section'] = inside section
+    const here = [course.title, ...currentPath].join('/');
 
-    // Collect all lessons and derive folders/files at current depth
-    const folders = new Set<string>();
-    const files: { id: string; name: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean }[] = [];
+    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'youtube' | 'folder'; done: boolean };
+    // A folder shows up in every section below it, so key the rows by path to keep one.
+    const rows = new Map<string, Row>();
 
     for (const section of course.sections) {
       // section.title is the sub-path joined by ' / ', e.g. null, 'Section', 'Section / Sub'
@@ -208,18 +225,34 @@ export class Course {
       if (depth === 0) {
         // Files directly at this level
         for (const l of section.lessons) {
-          files.push({ id: l.id, name: l.title, kind: l.kind, done: l.done });
+          rows.set(l.id, { id: l.id, path: l.id, name: l.title, kind: l.kind, done: l.done });
         }
       } else if (depth > 0) {
         // Next folder level
-        folders.add(sectionParts[currentPath.length]);
+        const name = sectionParts[currentPath.length];
+        const path = `${here}/${name}`;
+        rows.set(path, { id: 'folder:' + name, path, name, kind: 'folder', done: false });
       }
     }
 
-    return [
-      ...[...folders].sort().map((f) => ({ id: 'folder:' + f, name: f, kind: 'folder' as const, done: false })),
-      ...files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
-    ];
+    // Everything in one folder shares one sequence: numbered items first, in the admin's
+    // order, then unnumbered ones (folders before files, each by name).
+    const order = this.api.order();
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    const sorted = [...rows.values()].sort((a, b) => {
+      const pa = order[a.path];
+      const pb = order[b.path];
+      if (pa != null && pb != null) return pa - pb || collator.compare(a.name, b.name);
+      if (pa != null) return -1;
+      if (pb != null) return 1;
+      if (a.kind === 'folder' && b.kind !== 'folder') return -1;
+      if (a.kind !== 'folder' && b.kind === 'folder') return 1;
+      return collator.compare(a.name, b.name);
+    });
+
+    // The number a student sees is the item's place in this folder, so it stays 1..N even
+    // for entries the admin never numbered.
+    return sorted.map((row, i) => ({ ...row, index: i + 1 }));
   });
 
   protected openCourse(c: CourseData): void {

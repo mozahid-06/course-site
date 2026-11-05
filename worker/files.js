@@ -44,6 +44,61 @@ export function cleanKey(raw) {
 }
 
 const base = (prefix) => (prefix ? prefix + '/' : '');
+const parentOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+const entryName = (p) => p.slice(p.lastIndexOf('/') + 1);
+
+async function orderPositions(env) {
+  const rows = (await env.DB.prepare('SELECT path, position FROM content_order').all()).results || [];
+  return new Map(rows.map((r) => [String(r.path), Number(r.position)]));
+}
+
+/**
+ * Everything that shares one parent folder: sub-folders, files and YouTube lessons.
+ * `rank` is the default order used when an item has no saved position: folders first,
+ * then files, then YouTube lessons (each group by name).
+ */
+async function siblings(env, parent) {
+  const prefix = base(parent);
+  const out = [];
+  const seen = new Set();
+  let cursor;
+  do {
+    const r = await env.RESOURCES.list({ prefix, delimiter: '/', cursor, limit: 1000 });
+    for (const p of r.delimitedPrefixes || []) {
+      const full = p.replace(/\/$/, '');
+      const name = entryName(full);
+      if (!name || name === '_resources') continue;
+      out.push({ path: full, name, rank: 0 });
+      seen.add(full);
+    }
+    for (const o of r.objects) {
+      const name = o.key.slice(prefix.length);
+      if (!name || name.includes('/') || name === '.keep') continue;
+      if (!parent) continue; // root-level strays are not course entries
+      if (/\.(ts|vtt)$/i.test(name)) continue;
+      out.push({ path: o.key, name, rank: 1 });
+      seen.add(o.key);
+    }
+    cursor = r.truncated ? r.cursor : undefined;
+  } while (cursor);
+  const rows = (await env.DB.prepare('SELECT id FROM youtube_lessons').all()).results || [];
+  for (const row of rows) {
+    const id = String(row.id);
+    if (seen.has(id) || parentOf(id) !== parent) continue;
+    out.push({ path: id, name: entryName(id), rank: 2 });
+    seen.add(id);
+  }
+  return out;
+}
+
+const compareEntries = (positions) => (a, b) => {
+  const pa = positions.get(a.path);
+  const pb = positions.get(b.path);
+  if (pa != null && pb != null) return pa - pb || a.rank - b.rank || NUM.compare(a.name, b.name);
+  if (pa != null) return -1;
+  if (pb != null) return 1;
+  return a.rank - b.rank || NUM.compare(a.name, b.name);
+};
 
 /** One folder's contents: sub-folders and files, with .keep and HLS segments hidden. */
 async function listFolder(env, prefix) {
@@ -73,9 +128,106 @@ async function listFolder(env, prefix) {
     }
     cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
-  dirs.sort((a, b) => NUM.compare(a.name, b.name));
-  files.sort((a, b) => NUM.compare(a.name, b.name));
-  return { path: prefix, dirs, files };
+
+  const positions = await orderPositions(env);
+  const cmp = compareEntries(positions);
+  dirs.sort((a, b) => cmp({ path: a.path, name: a.name, rank: 0 }, { path: b.path, name: b.name, rank: 0 }));
+  files.sort((a, b) => cmp({ path: a.key, name: a.name, rank: 1 }, { path: b.key, name: b.name, rank: 1 }));
+
+  // The admin UI merges folders, files and YouTube lessons into one positioned list, so
+  // send the saved numbers for every entry in this folder (not just the R2 ones).
+  const order = {};
+  for (const d of dirs) if (positions.has(d.path)) order[d.path] = positions.get(d.path);
+  for (const f of files) if (positions.has(f.key)) order[f.key] = positions.get(f.key);
+  for (const row of (await env.DB.prepare('SELECT id FROM youtube_lessons').all()).results || []) {
+    const id = String(row.id);
+    if (parentOf(id) === prefix && positions.has(id)) order[id] = positions.get(id);
+  }
+
+  return {
+    path: prefix,
+    dirs: dirs.map((d) => ({ ...d, position: positions.get(d.path) ?? null })),
+    files: files.map((f) => ({ ...f, position: positions.get(f.key) ?? null })),
+    order,
+  };
+}
+
+/**
+ * Set one entry's position inside its folder. The whole folder is renumbered 1..N so
+ * positions stay compact and there are never duplicate numbers. A null/empty position
+ * clears just that entry and falls back to the default order.
+ */
+async function setEntryPosition(env, rawPath, rawPosition, hooks) {
+  const path = cleanPath(rawPath);
+  if (path === null || !path) return bad('That name is not valid');
+  const parent = parentOf(path);
+  const entries = await siblings(env, parent);
+  const entry = entries.find((e) => e.path === path);
+  if (!entry) return bad('That item no longer exists', 404);
+
+  if (rawPosition === null || rawPosition === undefined || rawPosition === '') {
+    await env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(path).run();
+    hooks.invalidate();
+    return json({ ok: true, path, position: null });
+  }
+  const position = Number(rawPosition);
+  if (!Number.isInteger(position) || position < 1 || position > 9999) {
+    return bad('Position must be a whole number from 1 to 9999');
+  }
+
+  const positions = await orderPositions(env);
+  const ordered = entries.slice().sort(compareEntries(positions));
+  const rest = ordered.filter((e) => e.path !== path);
+  const at = Math.min(Math.max(position, 1), rest.length + 1) - 1;
+  rest.splice(at, 0, entry);
+
+  await runChunks(env, rest.map((e, i) => env.DB.prepare(
+    'INSERT INTO content_order (path, position) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET position = excluded.position',
+  ).bind(e.path, i + 1)));
+  hooks.invalidate();
+  return json({
+    ok: true, path, position: at + 1,
+    order: Object.fromEntries(rest.map((e, i) => [e.path, i + 1])),
+  });
+}
+
+/** Keeps saved positions attached to entries when a file or folder is renamed/moved. */
+async function orderMoveStatements(env, from, to, single) {
+  const rows = (await env.DB.prepare('SELECT path, position FROM content_order').all()).results || [];
+  const out = [];
+  for (const row of rows) {
+    const p = String(row.path);
+    const inside = single ? p === from : (p === from || p.startsWith(from + '/'));
+    if (!inside) continue;
+    const next = to + p.slice(from.length);
+    out.push(env.DB.prepare('INSERT OR REPLACE INTO content_order (path, position) VALUES (?, ?)').bind(next, Number(row.position)));
+    out.push(env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(p));
+  }
+  // A number only means something among its siblings; after a real move (not a rename)
+  // the entry falls back to the default order until the admin gives it a new number.
+  if (parentOf(from) !== parentOf(to)) {
+    out.push(env.DB.prepare('DELETE FROM content_order WHERE path = ?').bind(to));
+  }
+  return out;
+}
+
+/** Escapes a path for use as the literal start of a LIKE pattern. */
+const likePath = (p) => p.replace(/[\\%_]/g, '\\$&');
+
+/** A folder's YouTube lessons are D1 rows, so a folder move has to carry them too. */
+async function youtubeMoveStatements(env, from, to) {
+  const rows = (await env.DB.prepare(
+    "SELECT id, yt, created FROM youtube_lessons WHERE id LIKE ? ESCAPE '\\'",
+  ).bind(likePath(from) + '/%').all()).results || [];
+  return rows.flatMap((row) => {
+    const id = String(row.id);
+    const next = to + id.slice(from.length);
+    return [
+      env.DB.prepare('INSERT OR REPLACE INTO youtube_lessons (id, yt, created) VALUES (?, ?, ?)')
+        .bind(next, row.yt, row.created),
+      env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ?').bind(id),
+    ];
+  });
 }
 
 // ---- Moving and renaming ----
@@ -156,6 +308,21 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   }
   const targetObjects = await listAll(env, to + '/');
   if (targetObjects.some((o) => !destKeys.has(o.key))) return bad('Something already exists at ' + to, 409);
+  // YouTube lessons are rows, not objects, so the R2 check above cannot see them. A fresh
+  // folder move into a folder that already holds lessons would overwrite/merge them; refuse.
+  // A retry after the rows already moved has no source rows left, so it is allowed to finish
+  // deleting the old objects.
+  if (!single) {
+    const sourceYt = await env.DB.prepare(
+      "SELECT COUNT(*) n FROM youtube_lessons WHERE id LIKE ? ESCAPE '\\'",
+    ).bind(likePath(from) + '/%').first();
+    const destYt = await env.DB.prepare(
+      "SELECT COUNT(*) n FROM youtube_lessons WHERE id = ? OR id LIKE ? ESCAPE '\\'",
+    ).bind(to, likePath(to) + '/%').first();
+    if (Number(sourceYt && sourceYt.n) > 0 && Number(destYt && destYt.n) > 0) {
+      return bad('Something already exists at ' + to, 409);
+    }
+  }
   const copies = [];
   for (const p of pairs) {
     const [src, dst] = await Promise.all([env.RESOURCES.head(p.from), env.RESOURCES.head(p.to)]);
@@ -188,6 +355,8 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   if (!single && !from.includes('/')) {
     statements.push(env.DB.prepare('UPDATE OR REPLACE enrollments SET course = ? WHERE course = ?').bind(to, from));
   }
+  if (!single) statements.push(...(await youtubeMoveStatements(env, from, to)));
+  statements.push(...(await orderMoveStatements(env, from, to, !!single)));
   try {
     await runChunks(env, statements);
   } catch (e) {
@@ -273,6 +442,11 @@ async function deleteEntry(env, rawPath, hooks) {
   const statements = [...lessons].flatMap((k) => LESSON_DELETES.map((sql) => env.DB.prepare(sql).bind(k)));
   // A deleted course must not keep granting access to nothing.
   if (!single && !p.includes('/')) statements.push(env.DB.prepare('DELETE FROM enrollments WHERE course = ?').bind(p));
+  // Saved positions go with the entry and, for a folder, with everything under it.
+  statements.push(env.DB.prepare("DELETE FROM content_order WHERE path = ? OR path LIKE ? ESCAPE '\\'").bind(p, likePath(p) + '/%'));
+  // A folder's YouTube lessons are D1 rows too; leaving them behind would make the deleted
+  // folder (or course) reappear with its lessons intact.
+  statements.push(env.DB.prepare("DELETE FROM youtube_lessons WHERE id = ? OR id LIKE ? ESCAPE '\\'").bind(p, likePath(p) + '/%'));
   try {
     await runChunks(env, statements);
   } catch (e) {
@@ -448,6 +622,11 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/delete' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return deleteEntry(env, b.path, hooks);
+  }
+
+  if (path === '/api/admin/files/order' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return setEntryPosition(env, b.path, b.position, hooks);
   }
 
   if (path === '/api/admin/files/folder' && method === 'POST') {

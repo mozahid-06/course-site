@@ -91,8 +91,9 @@ Everything the owner needs for day-to-day content work, without `rclone`:
 
 - **Upload:** pick files or drag them onto the open folder. Small files (up to 16 MiB) go in one request; larger ones are split into 8 MiB parts sent in parallel, and the browser uploads them **straight to R2** with URLs the Worker signs, so a multi-gigabyte video costs the Worker nothing. A name that already exists is refused; choose **Replace** if you mean to overwrite.
 - **Reload mid-upload:** the row shows *Paused — re-select the file*. Choose the same file and only the missing parts are sent. If R2 has already dropped the upload, it starts over and says so.
-- **Rename / move:** a lesson keeps its comments, notes, progress and resources; a course rename also keeps its students' access. A folder cannot be moved inside itself, a lesson cannot be renamed to something the site will not show, and neither an existing file nor a folder that already holds files is overwritten or merged into.
-- **Delete:** removes the file and its student data; deleting a course also removes its enrollments. If the cleanup is interrupted, running the same delete again finishes it. Deleting a file cannot be undone, and folders require typing the name to confirm.
+- **Rename / move:** a lesson keeps its comments, notes, progress and resources; a course rename also keeps its students' access. A folder move also carries its YouTube lessons. A folder cannot be moved inside itself, a lesson cannot be renamed to something the site will not show, and neither an existing file nor a folder that already holds files or lessons is overwritten or merged into.
+- **Delete:** removes the file and its student data (including YouTube lessons under a deleted folder); deleting a course also removes its enrollments. If the cleanup is interrupted, running the same delete again finishes it. Deleting a file cannot be undone, and folders require typing the name to confirm.
+- **Order:** every row has a small number box at the left. Type a place and press Enter (or click away) to move the item there; the folder renumbers itself 1..N, and folders, files and YouTube lessons share one sequence. Leave the box blank to put the item back in the default order. Students see a number before every item in the browser; the home-screen course cards can be ordered the same way.
 - **New folder:** a folder at the top level is a course. An empty folder is held by a hidden zero-byte `.keep`.
 
 Uploads need three Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; optional `R2_BUCKET`) and a bucket CORS rule that exposes `ETag`. You do not create the CORS rule by hand — `npm run deploy` adds it for the deployed URL. The same pass creates the bucket and its lifecycle rule (incomplete multipart uploads are aborted after 7 days, so an abandoned upload does not keep paying for parts). Run `npm run doctor` to check all of it.
@@ -219,7 +220,8 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 | `GET /api/config` | public | `{googleClientId}` (empty when not configured) |
 | `POST /api/login/google` | public | `{credential}` Google ID token; invite-only |
 | `GET /api/me` | signed in | Current user (`id, email, is_admin`) |
-| `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket plus YouTube lessons (`kind` is `video`, `pdf` or `youtube`; `youtube` also has `yt`, the video id) |
+| `GET /api/course` | signed in | `[{title, sections:[{title, lessons:[{id,title,kind,done}]}]}]` from the bucket plus YouTube lessons (`kind` is `video`, `pdf` or `youtube`; `youtube` also has `yt`, the video id); sorted by the admin's saved order |
+| `GET /api/order` | signed in | `{path: position}` for the courses this user can see; the student browser uses it for its number labels |
 | `GET /api/media/<key>` | signed in | Playlist, segment, video or PDF (range requests supported) |
 | `POST /api/progress` | signed in | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded pdf key>` | signed in | The student's own notes for one PDF (`PUT {data: []}`); `403` for a course they do not have |

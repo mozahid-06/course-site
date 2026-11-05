@@ -1,9 +1,20 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, signal } from '@angular/core';
-import { Api, FileListing, YoutubeLesson } from './api';
+import { Api, FileEntry, FileListing, YoutubeLesson } from './api';
 import { CsvReject, CsvRow, parseYoutubeCsv } from './youtube-csv';
 import { UploadJob, Uploader } from './upload';
 
 type Kind = 'file' | 'folder';
+
+/** One row of the admin list: a folder, an R2 file or a YouTube lesson, all in one sequence. */
+interface Row {
+  path: string;
+  name: string;
+  kind: Kind | 'youtube';
+  meta: string;
+  position: number | null;
+  file: FileEntry | null;
+  yt: { id: string; name: string; yt: string } | null;
+}
 
 interface Ask {
   title: string;
@@ -107,84 +118,87 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
       }
 
       <div class="files-list" role="list">
-        @for (d of listing().dirs; track d.path) {
+        @for (row of rows(); track row.path) {
           <div class="files-row" role="listitem">
-            <button type="button" class="files-open" (click)="open(d.path)">
-              <span class="files-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.5h5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z" /></svg>
-              </span>
-              <span class="files-name">{{ d.name }}</span>
-              <span class="files-meta">Folder</span>
-            </button>
-            <div class="files-tools">
-              <button type="button" class="files-tool" title="Rename" aria-label="Rename folder" (click)="askRename(d.name, d.path, 'folder')">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
+            <input
+              #pos
+              class="files-pos"
+              type="number"
+              min="1"
+              max="9999"
+              inputmode="numeric"
+              placeholder="–"
+              [value]="row.position ?? ''"
+              [disabled]="savingPos() === row.path"
+              [attr.aria-label]="'Position of ' + row.name"
+              (keydown.enter)="pos.blur()"
+              (change)="savePosition(row.path, pos)"
+            />
+            @if (row.kind === 'folder') {
+              <button type="button" class="files-open" (click)="open(row.path)">
+                <span class="files-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.5h5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z" /></svg>
+                </span>
+                <span class="files-name">{{ row.name }}</span>
+                <span class="files-meta">{{ row.meta }}</span>
               </button>
-              @if (d.path.includes('/')) {
-                <!-- A top-level folder is a course, and a course can only be renamed. -->
-                <button type="button" class="files-tool" title="Move" aria-label="Move folder" (click)="askMove(d.path, 'folder')">
+            } @else {
+              <span class="files-open as-span">
+                <span class="files-ico" aria-hidden="true">
+                  @if (row.kind === 'youtube') {
+                    <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
+                  } @else if (row.file?.lesson && !row.file?.hls) {
+                    @if (row.name.toLowerCase().endsWith('.pdf')) {
+                      <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
+                    } @else {
+                      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
+                    }
+                  } @else {
+                    <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
+                  }
+                </span>
+                <span class="files-name">{{ row.name }}</span>
+                <span class="files-meta">{{ row.meta }}</span>
+              </span>
+            }
+            <div class="files-tools">
+              @if (row.kind === 'file') {
+                <button type="button" class="files-tool" title="Rename" aria-label="Rename file" (click)="askRename(row.name, row.path, 'file')">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
+                </button>
+                <button type="button" class="files-tool" title="Move" aria-label="Move file" (click)="askMove(row.path, 'file')">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
                 </button>
-              }
-              <button type="button" class="files-tool danger" title="Delete" aria-label="Delete folder" (click)="askDelete(d.name, d.path, 'folder')">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
-              </button>
-            </div>
-          </div>
-        }
-
-        @for (f of listing().files; track f.key) {
-          <div class="files-row" role="listitem">
-            <span class="files-open as-span">
-              <span class="files-ico" aria-hidden="true">
-                @if (f.lesson && !f.hls) {
-                  @if (f.name.toLowerCase().endsWith('.pdf')) {
-                    <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
-                  } @else {
-                    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m10 9 5 3-5 3z" /></svg>
-                  }
-                } @else {
-                  <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></svg>
+                <button type="button" class="files-tool danger" title="Delete" aria-label="Delete file" (click)="askDelete(row.name, row.path, 'file')">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
+                </button>
+              } @else if (row.kind === 'folder') {
+                <button type="button" class="files-tool" title="Rename" aria-label="Rename folder" (click)="askRename(row.name, row.path, 'folder')">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
+                </button>
+                @if (row.path.includes('/')) {
+                  <!-- A top-level folder is a course, and a course can only be renamed. -->
+                  <button type="button" class="files-tool" title="Move" aria-label="Move folder" (click)="askMove(row.path, 'folder')">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
+                  </button>
                 }
-              </span>
-              <span class="files-name">{{ f.name }}</span>
-              <span class="files-meta">{{ size(f.size) }}{{ f.lesson ? ' · lesson' : '' }}{{ f.hls ? ' · HLS' : '' }}</span>
-            </span>
-            <div class="files-tools">
-              <button type="button" class="files-tool" title="Rename" aria-label="Rename file" (click)="askRename(f.name, f.key, 'file')">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
-              </button>
-              <button type="button" class="files-tool" title="Move" aria-label="Move file" (click)="askMove(f.key, 'file')">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
-              </button>
-              <button type="button" class="files-tool danger" title="Delete" aria-label="Delete file" (click)="askDelete(f.name, f.key, 'file')">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
-              </button>
-            </div>
-          </div>
-        }
-        @for (y of ytRows(); track y.id) {
-          <div class="files-row" role="listitem">
-            <span class="files-open as-span">
-              <span class="files-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
-              </span>
-              <span class="files-name">{{ y.name }}</span>
-              <span class="files-meta">video · {{ y.yt }}</span>
-            </span>
-            <div class="files-tools">
-              <button type="button" class="files-tool" title="Change link" aria-label="Change YouTube link" (click)="editYt(y)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
-              </button>
-              <button type="button" class="files-tool danger" title="Delete" aria-label="Delete YouTube lesson" (click)="removeYt(y)">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
-              </button>
+                <button type="button" class="files-tool danger" title="Delete" aria-label="Delete folder" (click)="askDelete(row.name, row.path, 'folder')">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
+                </button>
+              } @else {
+                <button type="button" class="files-tool" title="Change link" aria-label="Change YouTube link" (click)="editYt(row.yt!)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
+                </button>
+                <button type="button" class="files-tool danger" title="Delete" aria-label="Delete YouTube lesson" (click)="removeYt(row.yt!)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M6 7l1 13h10l1-13" /></svg>
+                </button>
+              }
             </div>
           </div>
         }
       </div>
 
-      @if (!loading() && !listing().dirs.length && !listing().files.length && !ytRows().length) {
+      @if (!loading() && !rows().length) {
         <p class="files-empty">This folder is empty. Drop files here to upload.</p>
       }
 
@@ -290,9 +304,10 @@ export class AdminFiles implements OnDestroy {
 
   protected readonly path = signal('');
   protected readonly dragging = signal(false);
-  protected readonly listing = signal<FileListing>({ path: '', dirs: [], files: [] });
+  protected readonly listing = signal<FileListing>({ path: '', dirs: [], files: [], order: {} });
   protected readonly loading = signal(true);
   protected readonly error = signal('');
+  protected readonly savingPos = signal<string | null>(null);
   protected readonly ask = signal<Ask | null>(null);
   protected readonly askValue = signal('');
   protected readonly askError = signal('');
@@ -331,6 +346,68 @@ export class AdminFiles implements OnDestroy {
       .filter((l) => l.id.slice(0, Math.max(0, l.id.lastIndexOf('/'))) === here)
       .map((l) => ({ id: l.id, name: l.lesson, yt: l.yt }));
   });
+
+  /**
+   * Folders, files and YouTube lessons of the open folder in one list. Numbered entries
+   * come first in their saved order; the rest follow in the default order the student
+   * site uses (folders, then files, then YouTube; each by name).
+   */
+  protected readonly rows = computed<Row[]>(() => {
+    const listing = this.listing();
+    const order = listing.order || {};
+    const rank = { folder: 0, file: 1, youtube: 2 } as const;
+    const rows: Row[] = [
+      ...listing.dirs.map((d) => ({
+        path: d.path, name: d.name, kind: 'folder' as const, meta: 'Folder',
+        position: order[d.path] ?? null, file: null, yt: null,
+      })),
+      ...listing.files.map((f) => ({
+        path: f.key, name: f.name, kind: 'file' as const,
+        meta: this.size(f.size) + (f.lesson ? ' · lesson' : '') + (f.hls ? ' · HLS' : ''),
+        position: order[f.key] ?? null, file: f, yt: null,
+      })),
+      ...this.ytRows().map((y) => ({
+        path: y.id, name: y.name, kind: 'youtube' as const, meta: `video · ${y.yt}`,
+        position: order[y.id] ?? null, file: null, yt: y,
+      })),
+    ];
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    return rows.sort((a, b) => {
+      if (a.position != null && b.position != null) return a.position - b.position || collator.compare(a.name, b.name);
+      if (a.position != null) return -1;
+      if (b.position != null) return 1;
+      return rank[a.kind] - rank[b.kind] || collator.compare(a.name, b.name);
+    });
+  });
+
+  /**
+   * Saves a position typed into the row's number box. Blank clears the number and puts
+   * the entry back in the default order. The server renumbers the folder 1..N, so the
+   * list is reloaded afterwards to show the stored numbers.
+   */
+  protected async savePosition(path: string, input: HTMLInputElement): Promise<void> {
+    if (this.savingPos()) return;
+    const raw = input.value.trim();
+    const current = this.listing().order[path] ?? null;
+    const next = raw === '' ? null : Number(raw);
+    if (next !== null && (!Number.isInteger(next) || next < 1 || next > 9999)) {
+      this.toast('Position must be a whole number from 1 to 9999', true);
+      input.value = current === null ? '' : String(current);
+      return;
+    }
+    if (next === current) return;
+    this.savingPos.set(path);
+    try {
+      await this.api.setFilePosition(path, next);
+      await this.load();
+      void this.api.init(); // the student browser uses the same numbers
+    } catch (e) {
+      this.toast(message(e), true);
+      input.value = current === null ? '' : String(current);
+    } finally {
+      this.savingPos.set(null);
+    }
+  }
 
   private drags = 0;
 

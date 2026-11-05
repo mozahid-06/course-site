@@ -13,9 +13,9 @@ export interface Comment {
   name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;
 }
 export interface ResourceItem { id: number; title: string; url: string; note: string | null; kind: 'link' | 'pdf' }
-export interface DirEntry { name: string; path: string }
-export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean }
-export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[] }
+export interface DirEntry { name: string; path: string; position?: number | null }
+export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean; position?: number | null }
+export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[]; order: Record<string, number> }
 export interface UploadPart { partNumber: number; etag: string; size?: number }
 
 /** A failed API call that still knows its HTTP status, which the uploader needs. */
@@ -28,6 +28,8 @@ export class Api {
   /** undefined = still checking the session, null = signed out */
   readonly me = signal<Me | null | undefined>(undefined);
   readonly courses = signal<CourseData[]>([]);
+  /** Admin-chosen positions by path, for the student browser's number labels. */
+  readonly order = signal<Record<string, number>>({});
 
   private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
     const res = await fetch('/api/' + path, body === undefined && !method ? {} : {
@@ -51,6 +53,7 @@ export class Api {
     try {
       this.me.set(await this.req<Me>('me'));
       this.courses.set(await this.req<CourseData[]>('course'));
+      this.order.set(await this.req<Record<string, number>>('order'));
     } catch {
       this.me.set(null);
     }
@@ -75,6 +78,7 @@ export class Api {
     await this.req('logout', {});
     this.me.set(null);
     this.courses.set([]);
+    this.order.set({});
   }
 
   async setDone(id: string, done: boolean): Promise<void> {
@@ -157,6 +161,13 @@ export class Api {
     return this.req('admin/files/move', { from, to, kind });
   }
   deleteEntry(path: string, kind: 'file' | 'folder'): Promise<unknown> { return this.req('admin/files/delete', { path, kind }); }
+  /**
+   * Places one entry at `position` inside its folder; the server renumbers the folder
+   * 1..N. `null` clears the number, which restores the default ordering for that entry.
+   */
+  setFilePosition(path: string, position: number | null): Promise<{ ok: true; path: string; position: number | null; order?: Record<string, number> }> {
+    return this.req('admin/files/order', { path, position });
+  }
 
   uploadStart(key: string, size: number, overwrite = false): Promise<{ uploadId: string; key: string }> {
     return this.req('admin/files/upload/start', { key, size, overwrite });
