@@ -12,7 +12,7 @@ course-site/
   package.json           Angular + wrangler; `npm run deploy` builds then deploys
   worker/index.js        API, auth, admin, course listing, media streaming (the Worker)
   worker/files.js        File manager API: listing, folders, move/rename, delete, upload handshake
-  worker/youtube.js      YouTube lessons: a lesson path -> YouTube link map (edited by hand, no upload)
+  worker/youtube.js      YouTube lessons: an optional first-run seed (lessons are managed in the Admin panel)
   worker/s3.js           R2 S3 signing (aws4fetch): server calls and presigned browser PUTs
   src/
     styles.css           All styling: tokens, light/dark, desktop + phone layouts
@@ -51,7 +51,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
 - Names sort naturally, so prefix with `01`, `02`. New uploads appear within about a minute (the listing is cached 60 s per Worker instance).
 - Progress, comments, notes and resources are stored by object key. Rename or move through **Admin panel → Files** and they follow; renaming with rclone or the dashboard does not.
-- **YouTube lessons** are added on top of the bucket listing from `worker/youtube.js` (below), so a lesson can exist without a file in R2.
+- **YouTube lessons** are added on top of the bucket listing and managed from **Admin panel → YouTube** (below), so a lesson can exist without a file in R2.
 
 ## Accounts and the Admin panel
 
@@ -97,23 +97,15 @@ Uploads need four Worker secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRE
 
 A lesson can be a YouTube video instead of a file. This costs nothing and needs no upload, which is the point for lessons already on YouTube.
 
-Edit **`worker/youtube.js`** and add one line per lesson:
+Add one from the site: sign in as an admin, open **Admin panel → YouTube**, and fill in the form — **Course** (pick an existing one from the list or type a new name), **Folder** (optional; use `/` to nest), **Lesson name**, and the **YouTube link** (any usual link — watch, `youtu.be`, `/embed`, `/shorts`, `/live` — or just the video id). The list below the form shows every YouTube lesson, each with **Edit** (change the link) and **Delete**.
 
-```js
-export const YOUTUBE_LESSONS = {
-  // "<Course>/<Folder>/<Name>": "<YouTube link>"
-  "Physics/Week 1/Welcome": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-  "Physics/Intro to forces": "https://youtu.be/dQw4w9WgXcQ",
-  "Maths/15 - Limits": "dQw4w9WgXcQ",
-};
-```
+Lessons are stored in D1 (table `youtube_lessons`), so a change shows up straight away — **no redeploy**.
 
-- The key uses the same shape as an R2 key. The **first** segment is the course, the middle segments are folders (shown joined with ` / `), and the **last** segment is the lesson name. A lesson directly in a course root is just `<Course>/<Name>`.
-- The value can be any usual YouTube link (watch, `youtu.be`, `/embed`, `/shorts`, `/live`) or just the video id.
 - A course that only has YouTube lessons is created automatically, so it shows on the home screen and can be granted to students like any other course.
-- If an entry names a file that already exists in R2, the real file wins and the entry is ignored. Entries with an unusable link are skipped (they never create an empty course or section).
+- If a path names a file that already exists in R2, the real file wins: the form warns you that the lesson will not show, and the listing ignores it (a non-YouTube link is refused before anything is created).
 - YouTube lessons behave like video lessons: **Mark as complete**, the discussion, private notes and resources all work.
-- Changing the file takes effect after the next **deploy** (or an `npm run api` restart locally); the course listing is also cached about 60 s per Worker instance.
+
+`worker/youtube.js` still exists but only as an **optional first-run seed**: on the first deploy that creates the table, whatever is in it is copied into D1 once, and after that it is ignored (so deleting a lesson in the panel sticks). You never need to edit it.
 
 The player is a plain iframe from `youtube.com/embed` (privacy-friendly, `rel=0` so the end screen stays on the video), with the student's email watermark moving over it, and `public/_headers` allows `youtube.com` / `youtube-nocookie.com` in `frame-src`.
 
@@ -207,6 +199,9 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 | `POST /api/progress` | signed in | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded pdf key>` | signed in | The student's own notes for one PDF (`PUT {data: []}`); `403` for a course they do not have |
 | `GET /api/admin/courses` | admin | Course names found in the bucket |
+| `GET /api/admin/youtube` | admin | `[{id, course, folder, lesson, yt}]` — the YouTube lessons |
+| `POST /api/admin/youtube` | admin | `{course, folder?, lesson, link}` adds or edits one; `{ok, id, yt, shadowed}`, `shadowed` when a file already uses the path |
+| `DELETE /api/admin/youtube` | admin | `{id}` removes one |
 | `POST /api/admin/users/<id>/courses` | admin | `{courses: []}` replaces the student's courses |
 | `GET /api/admin/users` | admin | List users with role and lessons done |
 | `POST /api/admin/users` | admin | Add a user `{email, password, is_admin?, google_only?, courses?}` |

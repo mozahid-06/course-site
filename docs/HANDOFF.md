@@ -19,7 +19,7 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | Decision | Reason |
 | --- | --- |
 | Not YouTube unlisted (as the storage) | The video ID is visible in DevTools and the link is permanent, so it cannot protect paid content. |
-| YouTube lessons are opt-in, from `worker/youtube.js` | Sometimes a lesson already lives on YouTube and uploading it again is wasted work. A hand-edited `"<Course>/<Folder>/<Name>": "<link>"` map adds such lessons with no upload, no R2 cost and no schema change. It is an addition to the bucket listing, not a replacement for it. |
+| YouTube lessons are opt-in, managed in D1 | Sometimes a lesson already lives on YouTube and uploading it again is wasted work. Lessons are stored in the `youtube_lessons` table and edited from **Admin panel → YouTube** (no redeploy, no upload, no R2 cost). It is an addition to the bucket listing, not a replacement for it. `worker/youtube.js` is only a first-run seed. |
 | YouTube lesson keys are R2-key shaped | So progress, comments, notes, resources and enrollments all key off the same `lesson` string as a real file. The course is the first segment, so a YouTube-only course is a normal course and can be granted to students. A real file with the same key wins the clash. |
 | Cloudflare R2 for storage | Free egress, about $0.015/GB-month. |
 | Worker serves media | Checks a login before any byte is sent; supports range requests so seeking works. |
@@ -63,7 +63,7 @@ Cloudflare Worker  (worker/index.js)
 | --- | --- |
 | `worker/index.js` | Backend entry: auth, admin seeding and endpoints, course listing, media streaming, progress; dispatches `/api/admin/files*` to `files.js` |
 | `worker/files.js` | File manager API: listing, create folder, move/rename, delete, and the upload handshake (start/part/url/complete/abort/parts) |
-| `worker/youtube.js` | YouTube lessons: `YOUTUBE_LESSONS`, a lesson-path → YouTube-link map, edited by hand (no upload). Merged into `listCourse`. |
+| `worker/youtube.js` | YouTube lessons: an optional first-run seed for the `youtube_lessons` table (lessons are managed from the Admin panel) |
 | `worker/s3.js` | R2 S3 signing with `aws4fetch`: `r2Config`, server calls (`s3Fetch`) and presigned browser PUTs (`presign`) |
 | `src/app/api.ts` | `Api` service: fetch wrapper (GET/POST/DELETE) and app state signals (`me`, `courses`); user-admin calls |
 | `src/app/app.ts` | Root: header (logo, Admin panel toggle, Sign out), switches course/admin views |
@@ -74,6 +74,7 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), full-window mode, download/print locked off |
 | `src/app/admin.ts` | Admin panel UI (users and course checkboxes) with a Files/Users toggle |
 | `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop |
+| `src/app/admin-youtube.ts` | Admin → YouTube view: add/edit/delete YouTube lessons (stored in D1) |
 | `src/app/upload.ts` | Uploader: part sizing, presigned PUTs, 3 parallel parts, progress, conflict/retry, resume from `localStorage` after a reload |
 | `src/styles.css` | All styling and the bundled logo font |
 | `src/curse-of-the-zombie.ttf` | Logo font (capitals only; CSS uppercases the logo) |
@@ -93,6 +94,7 @@ comments (id INTEGER PK, lesson TEXT, user_id INTEGER, parent_id INTEGER, body T
 comment_likes (comment_id INTEGER, user_id INTEGER, PRIMARY KEY (comment_id, user_id))
 video_notes (user_id INTEGER, lesson TEXT, body TEXT, updated INTEGER, PRIMARY KEY (user_id, lesson))
 resources (id INTEGER PK, lesson TEXT, title TEXT, url TEXT, note TEXT, created_by INTEGER, created INTEGER)
+youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)   -- id = lesson path "<Course>/<Folder>/<Name>", yt = YouTube video id; created in migrate() and seeded once from worker/youtube.js
 attempts (k TEXT PRIMARY KEY, n INTEGER, t INTEGER)   -- login throttling
 ```
 
@@ -111,6 +113,9 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `POST /api/progress` | session | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded key>` | session | Own notes for one `.pdf`; every query is scoped to the signed-in user; `403` if the course is not enrolled |
 | `GET /api/admin/courses` | admin | Course names from `listCourse` |
+| `GET /api/admin/youtube` | admin | `[{id, course, folder, lesson, yt}]` |
+| `POST /api/admin/youtube` | admin | `{course, folder?, lesson, link}`; `ytId` parses the link (`400` if not a YouTube link / course or lesson empty or containing `/`); upserts by path; `invalidateCourse()`; returns `{ok, id, yt, shadowed}` where `shadowed` is true when an R2 object already uses the id |
+| `DELETE /api/admin/youtube` | admin | `{id}`; deletes the row and `invalidateCourse()` |
 | `POST /api/admin/users/<id>/courses` | admin | `{courses: []}`; replaces the user's enrollments |
 | `GET /api/admin/users` | admin | Users with `watched` count and `owner` flag |
 | `POST /api/admin/users` | admin | `{email, password, is_admin?, google_only?}`; `google_only` stores an unusable random password hash |
@@ -138,7 +143,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 3. Course = first path segment. Section = remaining directories joined by `" / "` (empty = course root).
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
 5. Sort with a numeric-aware collator.
-6. Merge `YOUTUBE_LESSONS` from `worker/youtube.js`. Each key is split on `/`; the first segment is the course (created if missing, so a YouTube-only course appears), the middle segments form the section title (joined with `" / "`), and the last segment is the lesson name. `ytId()` accepts a watch/`youtu.be`/`embed`/`shorts`/`live` link or a bare id; an unusable link is skipped before anything is created, and a key that collides with a real file is ignored. The merged lesson is `{id, title, kind:'youtube', yt}` where `id` is the full path, so progress/comments/notes/resources/enrollments work unchanged.
+6. Merge `youtube_lessons` from D1 (managed in Admin → YouTube; seeded once from `worker/youtube.js`). Each row's `id` is split on `/`; the first segment is the course (created if missing, so a YouTube-only course appears), the middle segments form the section title (joined with `" / "`), and the last segment is the lesson name. `ytId()` accepts a watch/`youtu.be`/`embed`/`shorts`/`live` link or a bare id and is used on write; an unusable link is refused at the endpoint. The merged lesson is `{id, title, kind:'youtube', yt}` where `id` is the full path, so progress/comments/notes/resources/enrollments work unchanged. A row whose id matches a real file is skipped (the file wins).
 
 `/api/course` and `/api/media/*` then filter by `enrollments` (`myCourses`; admins get everything). The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` for both the main browser (current level) and the sidebar outline (`rows` computed: open folders only, flat list while searching).
 
@@ -198,19 +203,21 @@ See `docs/SECURITY.md`. In the Worker: D1 `attempts` table for login lockout (8 
 
 Verified: `ng build`; the local API suites (`59/59` file-manager checks, `35/35` discussion/notes/resources regression checks); and a live pass against the deployed Worker with a throwaway admin, student and course: `44/44` API checks, then Chromium at 1200/393/320 px covering create course/section, single-PUT and multipart uploads, drag-and-drop, duplicate-name **Replace**, rename/move (including Unicode and `&`/parentheses), Escape closing a dialog, delete file/folder/course, long-name truncation and no horizontal overflow. Real uploads were confirmed with `rclone size` (900 KB by single PUT; 20 MiB and 60 MiB by multipart). A 60 MiB upload reloaded after 6 of 8 parts resumed at 80% and completed at exactly 60 MiB. Cancelling during the start call, mid-parts, during a single PUT, and on a paused row after a reload left no object and no multipart upload. Test objects, users and enrollments were removed afterwards.
 
-## 4d. YouTube lessons (added later)
+## 4d. YouTube lessons (added later; UI-managed later still)
 
-- `worker/youtube.js` holds `YOUTUBE_LESSONS`, a hand-edited `"<Course>/<Folder>/<Name>": "<link>"` map. `listCourse` merges it into the bucket listing after the R2 walk. A bare id, a watch link, `youtu.be`, `/embed`, `/shorts` and `/live` are all accepted by `ytId()`.
-- The key is R2-key shaped on purpose: `id` is the full path, so `watched`, `comments`, `video_notes`, `pdf_notes`, `resources` and `enrollments` treat a YouTube lesson exactly like a file lesson. The first segment is the course, so a YouTube-only course appears in the admin Courses list and can be granted.
+- Lessons live in the D1 table `youtube_lessons (id, yt, created)` and are added/edited/deleted from **Admin panel → YouTube** (`src/app/admin-youtube.ts`, endpoints `GET/POST/DELETE /api/admin/youtube`). `POST` parses the link with `ytId()` (bare id, watch link, `youtu.be`, `/embed`, `/shorts`, `/live`), refuses anything else with `400`, upserts by path, calls `invalidateCourse()`, and reports `shadowed` when an R2 object already uses the id. So a change is live with no redeploy.
+- `worker/youtube.js` is only a first-run seed: `migrate()` creates the table (guarded by an `sqlite_master` existence check) and, only on that first creation, copies `YOUTUBE_LESSONS` in. The guard is what makes a later delete permanent.
+- `listCourse` reads the table after the R2 walk.
+- The id is R2-key shaped on purpose: `id` is the full path, so `watched`, `comments`, `video_notes`, `pdf_notes`, `resources` and `enrollments` treat a YouTube lesson exactly like a file lesson. The first segment is the course, so a YouTube-only course appears in the admin Courses list and can be granted.
 - Frontend: `course.ts` renders `<app-yt-player>` for `kind === 'youtube'` (instead of `<app-player>`), and both the file list and the header search show a distinct YouTube icon. `src/app/yt-player.ts` is a plain `<iframe src="https://www.youtube.com/embed/<id>?rel=0">` with the shared moving email watermark. `public/_headers` adds `youtube.com` and `youtube-nocookie.com` to the report-only CSP `frame-src`.
 - A YouTube lesson has no server-side "ended" event (the iframe is opaque), so completion is the lesson panel's **Mark as complete** button only; the video player's auto-finish-on-ended does not apply.
 
-Verified this session (local Worker, throwaway entries):
+Verified this session (local Worker):
 - `node --check worker/index.js worker/youtube.js` pass; `npm run typecheck` and `npm run build` exit 0; the built bundle contains the embed URL.
-- `wrangler dev` + curl: login, then `GET /api/course` returned `Test Course` with a root section (`Intro to forces`, `yt=abcdefghijk` from `youtu.be`) and `Week 1` (`Welcome`, `yt=dQw4w9WgXcQ` from `watch?v=`), plus a YouTube-only course `YouTube Only` (`First`, `yt=M7lc1UVf-VE` from a bare id). An entry with a bad link (`Bad Link`) was skipped with no empty section or empty course.
-- `POST /api/progress` on `YouTube Only/First` returned `ok`, `watching` marked it done on the next `GET /api/course`, and `/api/lesson/<id>/comments`, `/notes` and `/resources` all resolved (access check passed).
+- Storage/list: a direct D1 row appeared in `GET /api/course` as `kind:'youtube'`; after deleting it and restarting, it did **not** re-seed.
+- Endpoints: `POST` a `youtu.be` link → `{ok,id:'Physics/Week 1/Welcome',yt:'dQw4w9WgXcQ',shadowed:false}` and it showed in `/api/course` at once; a bad link, a slashed course and an empty lesson each `400`; re-`POST` of the same path left one row with the new `yt`; `DELETE` removed it. A real R2 object `Demo/Lecture.mp4` made `POST` return `shadowed:true` and the listing showed the file once as `kind:'video'`. A student got `403` on `POST`/`GET`/`DELETE`.
 
-Not verified: the iframe rendering in a real browser and on the live Worker — the CSP is report-only, so check the console after deploy.
+Not verified: clicking through the new Admin → YouTube tab in a real browser, and the iframe on the live Worker — the CSP is report-only, so check the console after deploy.
 
 ## 5. Known limitations and risks
 
@@ -254,7 +261,7 @@ Not verified: the iframe rendering in a real browser and on the live Worker — 
 - Keep the Worker `/api` contract and the Angular `Api` service in sync; change both together.
 - Never commit secrets, `.dev.vars`, `node_modules`, `dist`, or media files.
 - Upload media with `rclone`, never through git.
-- YouTube lesson keys in `worker/youtube.js` must keep the R2 key shape (`<Course>/<Folder>/<Name>`); the first segment is the course, so it must match the course folder name to join an existing course.
+- YouTube lesson paths keep the R2 key shape (`<Course>/<Folder>/<Name>`); the first segment is the course, so it must match a course folder name to join an existing course. They live in D1 and are edited from Admin → YouTube; `worker/youtube.js` is a first-run seed only.
 
 ## 8. Run and test
 
@@ -283,7 +290,7 @@ curl -b jar -H "Range: bytes=0-99" "localhost:8787/api/media/Demo/Notes.pdf" -i
 
 Use the in-app **Admin panel → Files** for ordinary work: pick or drag files onto a folder, and rename, move, delete or create folders there. It keeps student data attached and needs no `rclone`. Use `rclone` for bulk imports.
 
-If a lesson already lives on YouTube, add it to `worker/youtube.js` instead of uploading (see the README's "YouTube lessons" section and section 4d above). No R2 object, no upload, no cost.
+If a lesson already lives on YouTube, add it in **Admin panel → YouTube** instead of uploading (see the README's "YouTube lessons" section and section 4d above). No R2 object, no upload, no cost, no redeploy.
 
 Bucket: `course-sourse`. See the README for the folder mapping, the `rclone` setup and the MP4 `-movflags +faststart` fix (required for plain MP4 so playback starts without downloading the whole file).
 
