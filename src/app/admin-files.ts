@@ -46,7 +46,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
               <path d="M21 3v5h-5" />
             </svg>
           </button>
-          <button type="button" [disabled]="!path()" [title]="path() ? 'Add a YouTube lesson to this folder' : 'Open a course first'" (click)="openYt()">
+          <button type="button" class="files-yt-btn" title="Add a YouTube lesson to this folder" (click)="openYt()">
             <svg class="files-yt" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="m10 9 5 3-5 3z" /></svg>
             YouTube
           </button>
@@ -492,6 +492,7 @@ export class AdminFiles implements OnDestroy {
   }
 
   protected openYt(): void {
+    if (!this.path()) { this.toast('Open a course first — create one with New folder, then add a lesson inside it.'); return; }
     this.ytEditing.set(null);
     this.ytName.set('');
     this.ytLink.set('');

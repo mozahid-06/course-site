@@ -332,6 +332,7 @@ ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!import
 .files-job .files-tools>button:not(.files-tool){padding:.4rem .7rem;font-size:.82rem;white-space:nowrap}
 .files-up{width:17px!important;height:17px!important;flex:none}
 .files-head-acts .files-yt{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.files-head-acts .files-yt-btn{display:inline-flex;align-items:center;gap:.4rem}
 .files-head-acts .p{display:inline-flex;align-items:center;gap:.4rem}
 .files-head-acts .p .files-up{stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 
