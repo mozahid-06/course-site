@@ -129,10 +129,30 @@ interface LessonHit {
         </div>
       </header>
       @if (admin() && me.is_admin) {
-        @defer (on immediate) { <app-admin /> }
-      } @else { <app-course /> }
+        @defer (on immediate) {
+          <app-admin />
+        } @placeholder {
+          <div class="defer-fill" aria-live="polite">Loading admin panel…</div>
+        } @error {
+          <div class="defer-fill" role="alert">Could not load the admin panel. Check your connection and try again.</div>
+        }
+      } @else {
+        @defer (on immediate) {
+          <app-course />
+        } @placeholder {
+          <div class="defer-fill" aria-live="polite">Loading your courses…</div>
+        } @error {
+          <div class="defer-fill" role="alert">Could not load your courses. Check your connection and try again.</div>
+        }
+      }
     } @else if (api.me() === null) {
-      <app-login />
+      @defer (on immediate) {
+        <app-login />
+      } @placeholder {
+        <div class="defer-fill" aria-live="polite">Loading…</div>
+      } @error {
+        <div class="defer-fill" role="alert">Could not load the sign-in form. Check your connection and try again.</div>
+      }
     }
   `,
 })
