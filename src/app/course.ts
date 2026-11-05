@@ -81,7 +81,11 @@ type View =
             <div class="player-body" data-scroll-top>
               @if (l.kind === 'pdf') {
                 @defer (on immediate) {
-                  <app-pdf-viewer [key]="l.id" />
+                  <!-- One instance per lesson id: notes and the pending autosave belong to one PDF,
+                       so switching documents must destroy the old viewer instead of reusing it. -->
+                  @for (id of [l.id]; track id) {
+                    <app-pdf-viewer [key]="id" />
+                  }
                 } @placeholder {
                   <div class="defer-fill" aria-live="polite">Loading viewer…</div>
                 } @loading {

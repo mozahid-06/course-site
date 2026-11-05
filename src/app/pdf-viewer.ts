@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
-import { NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
+import { AnnotationEditorLayerRenderedEvent, NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
 
 // Open fast: stream the file, fetch only the pages being viewed, in larger chunks
@@ -116,7 +116,7 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         [enableDragAndDrop]="false"
         [contextMenuAllowed]="false"
         (pagesLoaded)="onLoaded()"
-        (annotationEditorLayerRendered)="onEditorLayer()"
+        (annotationEditorLayerRendered)="onEditorLayer($event)"
         (annotationEditorEvent)="onEdit()"
       ></ngx-extended-pdf-viewer>
     </div>
@@ -137,11 +137,13 @@ export class PdfViewer {
   protected readonly hidden = signal(false);
   protected readonly ready = signal(false);
   protected readonly status = signal('');
-  private saved: object[] = []; // what is stored on the server
+  private saved: object[] = []; // every note stored on the server for this PDF
   private applying = false; // true while we add/remove notes ourselves, so those events are not saved
-  private editorLayerReady = false; // notes can only be added after PDF.js has rendered the editor layer
+  private loadedKey = ''; // the key whose notes are loaded; a new key resets all note state
   private notesReady = false;
-  private notesApplied = false;
+  private readonly renderedPages = new Set<number>(); // pages whose annotation editor layer exists
+  private readonly appliedPages = new Set<number>(); // pages whose stored notes have been added
+  private readonly applyingPages = new Set<number>(); // pages being restored right now
   private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
@@ -188,25 +190,73 @@ export class PdfViewer {
   }
 
   protected async onLoaded(): Promise<void> {
+    const key = this.key();
+    if (this.loadedKey === key) return;
+    // A different PDF: drop everything that belonged to the previous document, including any
+    // debounced save (the view is recreated per lesson id, so the old instance already flushed).
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.loadedKey = key;
+    this.saved = [];
+    this.notesReady = false;
+    this.renderedPages.clear();
+    this.appliedPages.clear();
+    this.applyingPages.clear();
+    this.hidden.set(false);
+    this.status.set('');
     try {
-      this.saved = (await this.api.getNotes(this.key())).data;
-    } catch { this.status.set('Could not load your notes'); }
+      this.saved = (await this.api.getNotes(key)).data ?? [];
+    } catch {
+      if (key === this.key()) this.status.set('Could not load your notes');
+    }
+    if (key !== this.key()) return;
     this.notesReady = true;
     this.ready.set(true);
-    if (this.editorLayerReady) await this.applySaved();
+    await this.applyRendered();
   }
 
-  // The editor layer is rendered after `pagesLoaded`, and adding notes before that is silently
-  // skipped (PDF.js has no layer to deserialize them into), so wait for the layer itself.
-  protected onEditorLayer(): void {
-    this.editorLayerReady = true;
-    if (this.notesReady) void this.applySaved();
+  // The editor layer is created per page, after that page has rendered. Waiting for
+  // `pagesLoaded` is not enough: `addEditorAnnotation` silently skips notes whose page has no
+  // editor layer yet, so each page's notes are applied when its own layer appears (and pages
+  // farther down the document are restored when the reader scrolls to them).
+  protected onEditorLayer(event: AnnotationEditorLayerRenderedEvent): void {
+    const page = event.pageNumber - 1;
+    this.renderedPages.add(page);
+    if (this.notesReady) void this.applyPage(page);
   }
 
-  private async applySaved(): Promise<void> {
-    if (this.notesApplied) return;
-    this.notesApplied = true;
-    await this.apply(this.saved);
+  private async applyRendered(): Promise<void> {
+    for (const page of [...this.renderedPages]) await this.applyPage(page);
+  }
+
+  private async applyPage(page: number): Promise<void> {
+    if (!this.notesReady || this.hidden()) return;
+    if (this.appliedPages.has(page) || this.applyingPages.has(page)) return;
+    const notes = this.saved.filter((n) => ((n as { pageIndex?: number }).pageIndex ?? 0) === page);
+    if (!notes.length) { this.appliedPages.add(page); return; }
+    this.applyingPages.add(page);
+    try {
+      await this.apply(notes);
+      this.appliedPages.add(page);
+    } catch {
+      // Leave it unapplied: save() keeps the note in the payload rather than dropping it.
+    } finally {
+      this.applyingPages.delete(page);
+    }
+  }
+
+  /**
+   * What to send to the server. Saved notes for pages that have not rendered yet are not in
+   * `current()` (PDF.js held no editor layer for them), so they are added back here. Without
+   * this, any edit would delete notes on pages the reader had not scrolled to.
+   */
+  private payload(): object[] {
+    const notes = this.current();
+    const pending = this.saved.filter((n) => {
+      const page = (n as { pageIndex?: number }).pageIndex ?? 0;
+      return !this.appliedPages.has(page) && !this.applyingPages.has(page);
+    });
+    return pending.length ? [...notes, ...pending] : notes;
   }
 
   protected onEdit(): void {
@@ -217,8 +267,9 @@ export class PdfViewer {
 
   private async save(): Promise<void> {
     this.timer = undefined;
+    if (this.loadedKey !== this.key()) return;
     let notes: object[];
-    try { notes = this.current(); } catch { return; }
+    try { notes = this.payload(); } catch { return; }
     if (JSON.stringify(notes) === JSON.stringify(this.saved)) return;
     this.status.set('Saving…');
     try { await this.api.saveNotes(this.key(), notes); this.saved = notes; this.status.set('Saved'); }
@@ -233,8 +284,11 @@ export class PdfViewer {
     } else {
       const extra = this.current(); // anything written while the notes were hidden
       this.clear();
-      await this.apply([...this.saved, ...extra]);
+      this.saved = [...this.saved, ...extra];
+      this.appliedPages.clear();
+      this.applyingPages.clear();
       this.hidden.set(false);
+      await this.applyRendered();
       await this.save();
     }
   }
@@ -246,6 +300,8 @@ export class PdfViewer {
       await this.api.clearNotes(this.key());
       this.clear();
       this.saved = [];
+      this.appliedPages.clear();
+      this.applyingPages.clear();
       this.hidden.set(false);
       this.status.set('Back to the original');
     } catch (e) { this.status.set((e as Error).message || 'Could not reset'); }
