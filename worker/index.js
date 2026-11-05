@@ -86,6 +86,10 @@ async function migrate(env) {
   if (!has.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
   const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
   if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
+  const hasResKind = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'kind'").first();
+  if (!hasResKind.c) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
+  const hasResFile = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'file_key'").first();
+  if (!hasResFile.c) await env.DB.prepare('ALTER TABLE resources ADD COLUMN file_key TEXT').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
   // YouTube lessons are managed from the Admin panel. Created here (before listCourse runs
   // below) and seeded once from worker/youtube.js, so the hadYt guard makes a later delete
@@ -184,6 +188,7 @@ async function listCourse(env) {
   const courses = new Map();
   for (const key of keys) {
     if (/\.ts$/i.test(key)) continue; // skip HLS segments
+    if (key.split('/').includes('_resources')) continue; // resource PDFs are not lessons
     const pdf = /\.pdf$/i.test(key), video = VIDEO_EXT.test(key);
     if (!pdf && !video) continue;
     const parts = key.split('/');
@@ -566,8 +571,15 @@ const handle = async (req, env) => {
         const access = await lessonAccess(env, u, key);
         if (access !== 'ok') return accessError(access);
         if (m === 'GET') {
-          const rows = (await env.DB.prepare('SELECT id, title, url, note FROM resources WHERE lesson = ? ORDER BY created ASC').bind(key).all()).results;
-          return json({ resources: rows });
+          const rows = (await env.DB.prepare('SELECT id, title, url, note, kind, file_key FROM resources WHERE lesson = ? ORDER BY created ASC').bind(key).all()).results;
+          const resources = rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            url: r.kind === 'pdf' ? (r.file_key || '') : r.url,
+            note: r.note,
+            kind: r.kind === 'pdf' ? 'pdf' : 'link',
+          }));
+          return json({ resources });
         }
       }
       if (path.startsWith('/api/admin/')) {
@@ -589,8 +601,8 @@ const handle = async (req, env) => {
           if (note.length > 300) return json({ error: 'Keep the note under 300 characters' }, 400);
           const n = await env.DB.prepare('SELECT COUNT(*) n FROM resources WHERE lesson = ?').bind(key).first();
           if (n.n >= 100) return json({ error: 'This lesson already has 100 resources' }, 400);
-          const res = await env.DB.prepare('INSERT INTO resources (lesson, title, url, note, created_by, created) VALUES (?, ?, ?, ?, ?, ?)').bind(key, title, url, note || null, u.id, Date.now()).run();
-          return json({ resource: { id: res.meta.last_row_id, title, url, note: note || null } });
+          const res = await env.DB.prepare("INSERT INTO resources (lesson, title, url, note, created_by, created, kind) VALUES (?, ?, ?, ?, ?, ?, 'link')").bind(key, title, url, note || null, u.id, Date.now()).run();
+          return json({ resource: { id: res.meta.last_row_id, title, url, note: note || null, kind: 'link' } });
         }
         {
           const mr = /^\/api\/admin\/resources\/(\d+)$/.exec(path);
