@@ -84,8 +84,7 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/admin-files.ts` | File manager view: breadcrumb tree, rename/move/delete dialogs, new folder, upload rows, drag-and-drop, YouTube lessons (a toolbar button + rows with change-link/delete + a CSV batch import), and one position box per row |
 | `src/app/youtube-csv.ts` | Pure CSV parser for the YouTube batch import (`parseYoutubeCsv`, `ytId`); no Angular imports |
 | `src/app/upload.ts` | Uploader: part sizing, presigned PUTs, 3 parallel parts, progress, conflict/retry, resume from `localStorage` after a reload |
-| `src/styles.css` | All styling and the bundled logo font |
-| `src/curse-of-the-zombie.ttf` | Logo font (capitals only; CSS uppercases the logo) |
+| `src/styles.css` | All styling: tokens, light/dark, shared row/control primitives, desktop + phone layouts |
 | `angular.json` | Copies `public/` and the pdf viewer's `assets/` into the build |
 | `tools/make-hls.sh` | ffmpeg conversion to HLS; copies PDFs unchanged |
 | `proxy.conf.json` | Dev only: proxies `/api` from `ng serve` to `wrangler dev` on 8787 |

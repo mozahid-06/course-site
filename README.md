@@ -20,7 +20,6 @@ course-site/
   worker/s3.js           R2 S3 signing (aws4fetch): server calls and presigned browser PUTs
   src/
     styles.css           All styling: tokens, light/dark, desktop + phone layouts
-    curse-of-the-zombie.ttf   Logo font (bundled by the build; see License note)
     app/
       api.ts             API client and app state (signals)
       app.ts             Shell: header (logo, Admin panel toggle, Sign out)
@@ -182,9 +181,9 @@ Seed local R2 for testing:
 
 ## Look and feel
 
-- Light and dark follow the system setting. Colors, radii and shadows are tokens at the top of `src/styles.css`.
-- The logo uses *Curse of the Zombie*, which only has capital letters, so the CSS uppercases it.
-- Colors follow a four-color palette (`#202734`, `#36415A`, `#B7D894`, `#E0F8C7`) in dark mode; light mode is derived from it.
+- Light and dark are switchable from the header menu and remembered per browser (`localStorage['theme']`); with no choice stored, the first paint follows the system setting.
+- Type is Inter throughout; the wordmark is plain Inter (the old decorative logo font was retired).
+- Colors, radii and density are tokens at the top of `src/styles.css`; a slate/indigo palette (`#FAFAF7`/`#0B1120`, `#4338CA`/`#6366F1`) drives both themes.
 - Phones (≤760 px): the course outline is a scrollable box (up to 38% of the screen) above the lesson, the lesson bar stacks with a full-width "Mark as complete", the video runs edge to edge, and the Admin panel stacks into one column.
 - Video uses the browser's native controls, including fullscreen.
 
@@ -239,4 +238,4 @@ About $0.015/GB-month on R2 with free egress (60 GB is roughly $0.75-$1/month). 
 
 ## License
 
-MIT for the code (see `LICENSE`). The font *Curse of the Zombie* is **free for personal use only**; get a commercial license from its author before using it on a commercial site, or replace it in `src/styles.css`.
+MIT for the code (see `LICENSE`).
