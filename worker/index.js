@@ -642,7 +642,13 @@ const handle = async (req, env) => {
         {
           const mr = /^\/api\/admin\/resources\/(\d+)$/.exec(path);
           if (mr && m === 'DELETE') {
-            await env.DB.prepare('DELETE FROM resources WHERE id = ?').bind(Number(mr[1])).run();
+            const id = Number(mr[1]);
+            const row = await env.DB.prepare('SELECT file_key FROM resources WHERE id = ?').bind(id).first();
+            await env.DB.prepare('DELETE FROM resources WHERE id = ?').bind(id).run();
+            if (row && row.file_key) {
+              await env.RESOURCES.delete(row.file_key).catch(() => {});
+              await env.DB.prepare('DELETE FROM pdf_notes WHERE lesson = ?').bind(row.file_key).run();
+            }
             return json({ ok: true });
           }
         }
