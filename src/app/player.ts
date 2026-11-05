@@ -17,6 +17,7 @@ import { Api } from './api';
             <hlsjs-video
               [src]="src()"
               playsinline
+              autoplay
               disablepictureinpicture
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"
@@ -27,6 +28,7 @@ import { Api } from './api';
             <video
               [src]="src()"
               playsinline
+              autoplay
               disablepictureinpicture
               [attr.controls]="supported ? null : ''"
               controlslist="nodownload noremoteplayback"

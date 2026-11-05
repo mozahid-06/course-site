@@ -143,13 +143,16 @@ main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1.6rem clamp(1r
 .vw video-player,.vw video-skin{display:block;width:100%}
 .vw video-skin{aspect-ratio:16/9}
 .vw video-skin>:is(video,youtube-video,hlsjs-video),.vw video-skin>[slot=poster]{width:100%;height:100%;display:block}
-/* Cover the YouTube embed until playback starts, so its thumbnail/title/red button never flash.
-   The slotted poster inherits pointer-events:none from media-poster; set it explicitly too so
-   taps always fall through to the skin's play gesture. */
-.yt-poster{position:relative;background:#0b1220;pointer-events:none}
-.yt-poster svg{position:absolute;inset:0;margin:auto;width:clamp(40px,11%,64px);height:auto;color:rgba(255,255,255,.9);filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+/* Covers the YouTube embed's own thumbnail/title/red button until playback really starts.
+   It sits above the media, the buffering spinner and the control bar (z-index 30), but below
+   the moving watermark. It is a real button so a tap can start playback with sound when the
+   browser blocks unmuted autoplay; being a <button> also keeps the skin's tap-to-toggle
+   gesture from firing. */
+.yt-cover{position:absolute;inset:0;z-index:35;display:block;width:100%;height:100%;padding:0;border:0;cursor:pointer;background:#0b1220;color:#fff;-webkit-tap-highlight-color:transparent}
+.yt-cover:focus-visible{outline:3px solid #93c5fd;outline-offset:-3px}
+.yt-cover svg{position:absolute;inset:0;margin:auto;width:clamp(40px,11%,64px);height:auto;color:rgba(255,255,255,.9);filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
 .vw iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#000}
-.wm{position:absolute;z-index:2;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
+.wm{position:absolute;z-index:50;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
 ngx-extended-pdf-viewer{line-height:normal;display:block}
 ngx-extended-pdf-viewer #toolbarContainer{height:32px!important;padding:0 8px!important;box-sizing:border-box!important}
 ngx-extended-pdf-viewer #toolbarViewer{min-height:0!important;height:100%!important}
