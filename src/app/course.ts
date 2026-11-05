@@ -83,16 +83,27 @@ type View =
                 @defer (on immediate) {
                   <app-pdf-viewer [key]="l.id" />
                 } @placeholder {
-                  <p class="empty">Loading viewer…</p>
+                  <div class="defer-fill" aria-live="polite">Loading viewer…</div>
                 } @loading {
-                  <p class="empty">Loading viewer…</p>
+                  <div class="defer-fill" aria-live="polite">Loading viewer…</div>
+                } @error {
+                  <div class="defer-fill" role="alert">Could not load the viewer. Check your connection and try again.</div>
                 }
-              } @else if (l.kind === 'youtube') {
-                <app-yt-player [yt]="l.yt || ''" />
-                <app-lesson-panel [lesson]="l" />
               } @else {
-                <app-player [key]="l.id" (ended)="finish(l)" />
-                <app-lesson-panel [lesson]="l" />
+                @defer (on immediate) {
+                  @if (l.kind === 'youtube') {
+                    <app-yt-player [yt]="l.yt || ''" />
+                  } @else {
+                    <app-player [key]="l.id" (ended)="finish(l)" />
+                  }
+                  <app-lesson-panel [lesson]="l" />
+                } @placeholder {
+                  <div class="defer-fill" aria-live="polite">Loading lesson…</div>
+                } @loading {
+                  <div class="defer-fill" aria-live="polite">Loading lesson…</div>
+                } @error {
+                  <div class="defer-fill" role="alert">Could not load the lesson. Check your connection and try again.</div>
+                }
               }
             </div>
           }
