@@ -150,13 +150,24 @@ main{overflow:hidden;display:flex;flex-direction:column}
 main:has(.list){overflow-y:auto;padding:1.4rem clamp(1rem,3vw,2rem)}
 .list{display:flex;flex-direction:column;max-width:900px;margin:0 auto;width:100%}
 .list .page-title{margin-bottom:.6rem}
-.course-item{display:flex;align-items:center;gap:.7rem;min-height:var(--row-h);padding:0 .5rem;width:100%;text-align:left;color:inherit;border-bottom:1px solid var(--border)}
-.course-item:hover:not(:disabled){background:var(--hover)}
+.list.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:1.1rem;max-width:1240px;align-content:start}
+.cards .page-title{grid-column:1/-1;margin-bottom:.4rem}
+.cards .empty{grid-column:1/-1}
+.course-card{display:flex;flex-direction:column;gap:.8rem;min-height:186px;padding:1.25rem 1.4rem;width:100%;text-align:left;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:12px;transition:border-color .12s,background .12s}
+.course-card:hover:not(:disabled),.course-card:focus-visible{background:var(--hover);border-color:var(--primary)}
+.course-card .card-head{display:flex;align-items:center;gap:.7rem}
+.course-card .row-glyph{width:20px;height:20px}
+.course-card .row-glyph svg{width:20px;height:20px;stroke-width:1.7}
+.course-card .card-title{flex:1;min-width:0;font-size:17px;font-weight:600;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.course-card .card-desc{color:var(--muted);font-size:14px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}
+.course-card .card-foot{margin-top:auto;display:flex;flex-direction:column;gap:.6rem}
 .course-bar{flex:none;width:64px;height:3px;border-radius:2px;background:var(--border);overflow:hidden}
 .course-bar i{display:block;height:100%;background:var(--primary);border-radius:2px;transition:width .3s}
-.course-item .row-actions{opacity:0;color:var(--primary);font-weight:500;font-size:13.5px}
-.course-item:hover .row-actions,.course-item:focus-within .row-actions{opacity:1}
-@media(hover:none){.course-item .row-actions{opacity:1}}
+.course-card .course-bar{width:auto;height:5px}
+.course-card .card-meta-row{display:flex;align-items:center;justify-content:space-between;gap:.6rem}
+.course-card .row-meta{font-size:13px}
+.course-card .card-cta{color:var(--primary);font-weight:600;font-size:14px}
+.course-intro{color:var(--muted);font-size:13.5px;line-height:1.5;max-width:70ch;margin:.1rem 0 .4rem;white-space:pre-wrap}
 
 /* ===== Folder browser ===== */
 main:has(.breadcrumb),main:has(.browser){overflow-y:auto;padding:1rem clamp(1rem,3vw,2rem);display:flex;flex-direction:column;gap:.5rem}
@@ -510,7 +521,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   main:has(.breadcrumb),main:has(.browser){padding:1rem .8rem calc(1rem + env(safe-area-inset-bottom));overflow:visible}
   .breadcrumb{gap:.15rem}
   .fb-item{padding:0 .4rem}
-  .course-item{padding:0 .4rem}
+  .cards{grid-template-columns:1fr;gap:.65rem}
 
   /* Player: one compact row. The Back label and the complete label are dropped on
      phones (aria-label/title remain), so a PDF lesson keeps as much of the screen as

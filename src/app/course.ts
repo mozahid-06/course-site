@@ -35,6 +35,9 @@ type View =
                 <button class="bc-btn" (click)="goToBreadcrumb(i)">{{ seg }}</button>
               }
             </nav>
+            @if (!v.path.length && activeCourse()?.description) {
+              <p class="course-intro">{{ activeCourse()!.description }}</p>
+            }
           }
 
           <!-- File browser -->
@@ -123,19 +126,26 @@ type View =
           }
 
         } @else {
-          <div class="list">
+          <div class="list cards">
             <h1 class="page-title">Courses</h1>
             @for (c of courseCards(); track c.title) {
-              <button class="course-item" (click)="openCourse(c)">
-                <span class="row-glyph" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
+              <button class="course-card" (click)="openCourse(c)">
+                <span class="card-head">
+                  <span class="row-glyph" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
+                  </span>
+                  <span class="card-title">{{ c.title }}</span>
                 </span>
-                <span class="row-name">{{ c.title }}</span>
-                @if (courseTotal(c)) {
-                  <span class="course-bar" aria-hidden="true"><i [style.width.%]="coursePercent(c)"></i></span>
-                }
-                <span class="row-meta">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
-                <span class="row-actions">{{ courseDone(c) ? 'Continue' : 'Start' }}</span>
+                @if (c.description) { <span class="card-desc">{{ c.description }}</span> }
+                <span class="card-foot">
+                  @if (courseTotal(c)) {
+                    <span class="course-bar" aria-hidden="true"><i [style.width.%]="coursePercent(c)"></i></span>
+                  }
+                  <span class="card-meta-row">
+                    <span class="row-meta">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
+                    <span class="card-cta">{{ courseDone(c) ? 'Continue' : 'Start' }}</span>
+                  </span>
+                </span>
               </button>
             } @empty {
               <p class="empty">No courses yet.</p>
