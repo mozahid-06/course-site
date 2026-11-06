@@ -5,7 +5,6 @@ import { Login } from './login';
 import { LessonSearch } from './lesson-search';
 import { Shell } from './shell';
 import { OptionsMenu } from './options-menu';
-import { NavButtons } from './nav-buttons';
 
 interface LessonHit {
   id: string;
@@ -19,7 +18,7 @@ interface LessonHit {
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Login, OptionsMenu, RouterOutlet, NavButtons],
+  imports: [Login, OptionsMenu, RouterOutlet],
   host: {
     '[class.no-head]': '!shell.headerVisible()',
     '(document:click)': 'onDocClick($event)',
@@ -29,7 +28,6 @@ interface LessonHit {
       <!-- The header exists only on the course list and folder browser. -->
       @if (shell.headerVisible()) {
         <header [class.searching]="search.expanded()">
-          <app-nav-buttons />
           <h2 class="wordmark">Course</h2>
 
           <div class="head-search">

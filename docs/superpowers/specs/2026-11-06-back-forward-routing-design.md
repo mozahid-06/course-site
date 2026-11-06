@@ -18,8 +18,9 @@ back/forward, and an on-screen Back/Forward pair on desktop and phone.
 ## Goals
 - Every course screen has a shareable URL; refresh and deep links work.
 - Native back/forward and the phone back gesture move through the app.
-- One on-screen Back/Forward pair, reused in the header and the lesson bar,
-  sized for desktop and phone.
+- One on-screen Back/Forward pair in the lesson bar, sized for desktop and
+  phone. (It was removed from the top header — the browser/phone already has
+  its own controls there.)
 - The admin panel gains a URL too (so Back leaves it), and its "Course files"
   sub-view is a URL instead of a `#files` hash.
 - No visual or data-layer rewrite; login stays exactly as it is.

@@ -53,7 +53,7 @@ button.link:hover:not(:disabled){background:transparent!important;color:var(--te
 .icon-btn:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .icon-btn:disabled{opacity:.35;cursor:default}
 .icon-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-/* Browser-style back/forward pair, used in the header and the lesson bar. */
+/* Browser-style back/forward pair, used in the lesson bar. */
 .nav-btns{display:inline-flex;align-items:center;gap:.1rem;flex:none}
 
 /* Fields */
@@ -521,7 +521,7 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
   .head-search{flex:0 0 auto;margin:0 .3rem 0 auto;max-width:none}
   .head-field{display:none}
   .head-toggle{display:grid}
-  header.searching .wordmark,header.searching app-nav-buttons,header.searching app-options-menu{display:none}
+  header.searching .wordmark,header.searching app-options-menu{display:none}
   header.searching .head-search{flex:1;margin:0 auto}
   header.searching .head-field{display:flex}
   header.searching .head-toggle{display:none}
