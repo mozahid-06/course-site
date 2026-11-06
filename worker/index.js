@@ -567,6 +567,10 @@ const handle = async (req, env) => {
       }
       if (path === '/api/progress' && m === 'POST') {
         const { lesson, done } = await req.json();
+        // Same rule as comments/notes/resources: the lesson must exist and the student must
+        // be granted its course. lessonAccess also caps the key at 500 characters.
+        const access = await lessonAccess(env, u, lesson);
+        if (access !== 'ok') return accessError(access);
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
         return json({ ok: true });
       }
