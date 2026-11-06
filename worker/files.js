@@ -109,6 +109,13 @@ async function siblings(env, parent) {
     out.push({ path: id, name: entryName(id), rank: 2 });
     seen.add(id);
   }
+  // Sections implied by YouTube lessons (rank 0: they are folders), so setEntryPosition
+  // finds them and renumbers the whole folder including them.
+  for (const path of childDirsFromIds(parent, rows.map((r) => String(r.id)))) {
+    if (seen.has(path)) continue;
+    out.push({ path, name: entryName(path), rank: 0 });
+    seen.add(path);
+  }
   return out;
 }
 
@@ -149,6 +156,18 @@ async function listFolder(env, prefix) {
     }
     cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
+
+  // Folders that exist only as YouTube lessons (no R2 prefix) still belong in the listing,
+  // so the file view matches the student course view. A real R2 folder of the same path wins.
+  const seen = new Set(dirs.map((d) => d.path));
+  const ids = ((await env.DB.prepare('SELECT id FROM youtube_lessons').all()).results || []).map((r) => String(r.id));
+  for (const path of childDirsFromIds(prefix, ids)) {
+    if (seen.has(path)) continue;
+    const name = entryName(path);
+    if (!name) continue;
+    dirs.push({ name, path });
+    seen.add(path);
+  }
 
   const positions = await orderPositions(env);
   const cmp = compareEntries(positions);
