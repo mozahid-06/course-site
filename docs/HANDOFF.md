@@ -174,7 +174,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 
 - Cookie `s=<base64url(JSON{uid, v, sid, exp})>.<base64url(HMAC-SHA256 with SESSION_SECRET)>`, `HttpOnly; Secure; SameSite=Strict`, 7 days.
 - Each request re-reads the user row, so deleting a user ends their sessions immediately.
-- `users.sid` is the account's current session id (nullable). A student cookie is valid only while its `sid` matches the row, so an account has one live student session and a new login signs the old device out; admins (`is_admin = 1`, including the owner) skip the check. The client clears its session on any `401` (`Api.signOutLocal`) and revalidates on `window focus` / `document visibilitychange` (`Api.refreshMe`).
+- `users.sid` is the account's current session id (nullable). A student cookie is valid only while its `sid` matches the row, so an account has one live student session and a new login signs the old device out; admins (`is_admin = 1`, including the owner) skip the check. The client clears its session on any `401` (`Api.signOutLocal`, internal) and revalidates on `window focus` / `document visibilitychange` (`Api.refreshMe`). This stops account sharing via a new login (password or Google); it does **not** stop a student copying their own cookie value to a second device, since both carry the same valid `sid` — true per-device enforcement would need a `sessions` table with a per-device identity.
 - Admin seeding (`seedAdmin`) runs inside `ensureSchema`.
 - CSRF relies on `SameSite=Strict` plus JSON bodies.
 
