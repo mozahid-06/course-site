@@ -34,10 +34,10 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | Uploads go browser → R2 with presigned S3 URLs | A Worker request body is capped (about 100 MB), so large videos cannot pass through it. The Worker only signs each part; the bytes go straight to the bucket. |
 | Moves copy through the R2 binding, then rewrite D1, then delete | Avoids S3's 5 GiB copy ceiling and works against the local bucket in dev. A retry is safe: an identical copy at the target is treated as already done. |
 | Resource PDFs live in `<Course>/_resources/<uuid>.pdf`, not next to the lesson | A resource is a file the lesson links to, not a lesson. Hiding the folder from `listCourse` and the file manager keeps it out of the course tree, while the existing media/notes routes and enrollment checks work unchanged. One folder per course also gives course rename and cross-course moves an obvious rule: `file_key` is rewritten with the lesson, and a cross-course move copies the PDF to the destination course's `_resources`. |
-| Binding renamed `VIDEOS` → `RESOURCES` | It now holds PDFs and arbitrary files too. The bucket name `course-sourse` is unchanged (R2 buckets cannot be renamed). |
+| Binding renamed `VIDEOS` → `RESOURCES` | It now holds PDFs and arbitrary files too. The bucket name `<bucket-name>` is unchanged (R2 buckets cannot be renamed). |
 | D1 for users and progress only | Small relational data; progress keyed by R2 object key. |
 | Schema created lazily by the Worker | The Git deploy has no place to run migrations before the database exists. `CREATE TABLE IF NOT EXISTS` runs once per isolate. |
-| `wrangler.toml` bindings without IDs | Cloudflare provisions the D1 database and R2 bucket on the first Git deploy. Bucket is named `course-sourse` (spelling kept on purpose). |
+| `wrangler.toml` bindings without IDs | Cloudflare provisions the D1 database and R2 bucket on the first Git deploy. Bucket is named `<bucket-name>` (spelling kept on purpose). |
 | First admin from secrets | `ADMIN_EMAIL` + `ADMIN_PASSWORD` are read on every cold start; the user is created if missing and forced to admin. It replaced the old `/api/setup` + `SETUP_KEY` flow. |
 | Admin panel inside the app | Replaced the single "Add student" dialog. No router; `app.ts` toggles between `<app-course>` and `<app-admin>`. |
 | Angular 22 (upgraded from 21) | The reason to hold at 21 (Workers Builds had an older Node) is gone: the build image now defaults to Node 24, which Angular 22 supports. Angular 22 makes `OnPush` the default change detection strategy, so the `ng update` migration added `ChangeDetectionStrategy.Eager` to every existing component to keep behaviour unchanged; new components can use the OnPush default. |
@@ -157,7 +157,7 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `POST /api/admin/files/upload/abort` | admin | `{key, uploadId}`; drops the parts R2 kept |
 | `GET /api/admin/files/upload/parts?key=&uploadId=` | admin | Lists the parts already in R2, so a reload sends only the missing ones; `404` when the upload expired |
 
-Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and the upload values `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` plus optional `R2_BUCKET` (the API token needs Object Read & Write on `course-sourse`). Variable: `GOOGLE_CLIENT_ID` (public; enables Google sign-in). Without the `R2_*` secrets everything else works and only uploads answer `503`. `npm run doctor` reports which names are missing (never values).
+Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and the upload values `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` plus optional `R2_BUCKET` (the API token needs Object Read & Write on `<bucket-name>`). Variable: `GOOGLE_CLIENT_ID` (public; enables Google sign-in). Without the `R2_*` secrets everything else works and only uploads answer `503`. `npm run doctor` reports which names are missing (never values).
 
 ### Course discovery (`listCourse`)
 
@@ -340,7 +340,7 @@ npm run api      # Worker on http://localhost:8787 (local D1 and R2)
 npm start        # Angular on http://localhost:4200
 ```
 
-In dev the bindings use local D1/R2, but multipart uploads are signed and sent through the S3 API with the `R2_*` values from `.dev.vars`, so a local upload run writes real parts to `course-sourse`. Clean up test keys after a run; a crashed run can leave an incomplete upload, which the bucket lifecycle rule aborts after 7 days.
+In dev the bindings use local D1/R2, but multipart uploads are signed and sent through the S3 API with the `R2_*` values from `.dev.vars`, so a local upload run writes real parts to `<bucket-name>`. Clean up test keys after a run; a crashed run can leave an incomplete upload, which the bucket lifecycle rule aborts after 7 days.
 
 Smoke test (cookie jar `-c`/`-b`; uses the admin from `.dev.vars`):
 
@@ -359,10 +359,10 @@ Use the in-app **Admin panel → Files** for ordinary work: pick or drag files o
 
 If a lesson already lives on YouTube, add it in **Admin panel → Files** (the **YouTube** button) instead of uploading (see the README's "YouTube lessons" section and section 4d above). No R2 object, no upload, no cost, no redeploy.
 
-Bucket: `course-sourse`. See the README for the folder mapping, the `rclone` setup and the MP4 `-movflags +faststart` fix (required for plain MP4 so playback starts without downloading the whole file).
+Bucket: `<bucket-name>`. See the README for the folder mapping, the `rclone` setup and the MP4 `-movflags +faststart` fix (required for plain MP4 so playback starts without downloading the whole file).
 
 ```bash
-rclone copy "/path/to/video.mp4" "r2:course-sourse/Course Name/" --progress
+rclone copy "/path/to/video.mp4" "r2:<bucket-name>/Course Name/" --progress
 ```
 
 ## 10. Prompt to give another AI

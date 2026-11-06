@@ -51,7 +51,7 @@ lesson's comments, notes, or progress; or a course rename that un-enrolls every 
 
 ## 4. Current state (verified)
 
-- `worker/index.js` is the whole backend. R2 binding `VIDEOS` → bucket `course-sourse`;
+- `worker/index.js` is the whole backend. R2 binding `VIDEOS` → bucket `<bucket-name>`;
   `/api/media/<key>` streams video/PDF; `listCourse()` walks every object key, ignores anything
   that is not video or PDF, skips `.ts` segments, and shows `index.m3u8` as a lesson titled by
   its parent folder. Results are cached in a module-level variable for 60 s.
@@ -213,7 +213,7 @@ New Worker settings (local `.dev.vars`, production Worker secrets):
 R2_ACCOUNT_ID=<the id in the S3 endpoint host>
 R2_ACCESS_KEY_ID=<R2 API token access key id>
 R2_SECRET_ACCESS_KEY=<R2 API token secret>
-R2_BUCKET=course-sourse          # optional, defaults to course-sourse
+R2_BUCKET=<bucket-name>          # optional, defaults to <bucket-name>
 ```
 
 `.dev.vars.example` gains these with placeholders and comments. `.dev.vars` is never committed,
@@ -226,7 +226,7 @@ production or uploads fail with a clear error.
 **Bucket CORS rule** (required for browser uploads), allowing the live origin and the dev
 origins:
 
-- origins: `https://course-site.taxin.workers.dev`, `http://localhost:4200`,
+- origins: `https://<your-site>.workers.dev`, `http://localhost:4200`,
   `http://192.168.0.101:4200`
 - methods: `GET, HEAD, PUT, POST`
 - headers: `content-type`
@@ -235,7 +235,7 @@ origins:
 
 **Page CSP:** `public/_headers` ships a report-only policy whose `connect-src` allows only
 `'self'` and Google's sign-in. The R2 S3 endpoint must be added there — for this account,
-`https://2ee4cb2f8d4de267cc9e18ae77430723.r2.cloudflarestorage.com` — or every upload `PUT` is
+`https://<ACCOUNT_ID>.r2.cloudflarestorage.com` — or every upload `PUT` is
 blocked the moment the policy is enforced. `docs/SECURITY.md` already plans that switch, so the
 endpoint goes in as part of this work.
 
@@ -259,7 +259,7 @@ abandoned uploads do not accumulate. Configured once in the dashboard (documente
   separators, and require at least one `/` so nothing lands beside the course folders.
 - `listCourse()`'s in-memory cache is per Worker instance; clearing it on the instance handling
   the edit is best-effort, with the 60 s window as the fallback.
-- The bucket name `course-sourse` is fixed (R2 buckets cannot be renamed).
+- The bucket name `<bucket-name>` is fixed (R2 buckets cannot be renamed).
 
 ## 11. My calls (the owner has not decided these; change any of them if you disagree)
 

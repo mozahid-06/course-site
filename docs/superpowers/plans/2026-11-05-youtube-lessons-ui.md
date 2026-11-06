@@ -196,7 +196,7 @@ curl -s -b /tmp/jar localhost:8787/api/admin/youtube | python3 -m json.tool
 # delete
 curl -s -b /tmp/jar -X DELETE localhost:8787/api/admin/youtube -H 'content-type: application/json' -d '{"id":"Physics/Week 1/Welcome"}'
 # shadow: a real R2 object with the exact id wins, and the POST says so
-npx wrangler r2 object put "course-sourse/Demo/Lecture.mp4" --file ./README.md --local
+npx wrangler r2 object put "<bucket-name>/Demo/Lecture.mp4" --file ./README.md --local
 curl -s -b /tmp/jar -X POST localhost:8787/api/admin/youtube -H 'content-type: application/json' \
   -d '{"course":"Demo","lesson":"Lecture.mp4","link":"dQw4w9WgXcQ"}'          # expect "shadowed":true
 curl -s -b /tmp/jar localhost:8787/api/course | python3 -m json.tool          # Demo/Lecture.mp4 is kind "video", once

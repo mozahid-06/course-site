@@ -51,4 +51,12 @@ export class Shell {
     await this.api.logout();
     void this.router.navigateByUrl('/');
   }
+
+  /** Same local cleanup as signOut(), but ends every session for the account. */
+  async signOutEverywhere(): Promise<void> {
+    this.admin.set(false);
+    this.lessonOpen.set(false);
+    this.search.reset();
+    await this.api.logoutEverywhere();
+  }
 }

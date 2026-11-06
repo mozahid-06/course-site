@@ -740,7 +740,7 @@ Restart `wrangler dev`, then verify in real browser sessions:
 npm run deploy
 ```
 
-On `https://course-site.taxin.workers.dev`, sign in as owner, upload one PDF to a real video lesson, open it as an enrolled student, add a highlight, reload, confirm it persists, then remove the resource and confirm the file is gone. Record the deployed version id.
+On `https://<your-site>.workers.dev`, sign in as owner, upload one PDF to a real video lesson, open it as an enrolled student, add a highlight, reload, confirm it persists, then remove the resource and confirm the file is gone. Record the deployed version id.
 
 - [ ] **Step 4: Update the handoff docs**
 
