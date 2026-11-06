@@ -47,6 +47,27 @@ const base = (prefix) => (prefix ? prefix + '/' : '');
 const parentOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 const entryName = (p) => p.slice(p.lastIndexOf('/') + 1);
 
+/**
+ * Folder paths directly under `parent` that exist only because of YouTube lessons. A lesson
+ * id is <Course>/<Folder>/…/<name>; the segment right after `parent` is a folder only when
+ * the id has at least one more segment after it. `_resources` is never a folder.
+ */
+export function childDirsFromIds(parent, ids) {
+  const prefix = parent ? parent + '/' : '';
+  const out = new Set();
+  for (const raw of ids) {
+    const id = String(raw);
+    if (!id.startsWith(prefix)) continue;
+    const rest = id.slice(prefix.length);
+    const slash = rest.indexOf('/');
+    if (slash <= 0) continue; // a lesson directly in `parent`, not a folder
+    const seg = rest.slice(0, slash);
+    if (seg === '_resources') continue;
+    out.add(parent ? parent + '/' + seg : seg);
+  }
+  return [...out];
+}
+
 async function orderPositions(env) {
   const rows = (await env.DB.prepare('SELECT path, position FROM content_order').all()).results || [];
   return new Map(rows.map((r) => [String(r.path), Number(r.position)]));
