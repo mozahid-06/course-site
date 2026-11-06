@@ -354,6 +354,7 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
     .flatMap((p) => LESSON_ROWS.map((sql) => env.DB.prepare(sql).bind(p.to, p.from)));
   if (!single && !from.includes('/')) {
     statements.push(env.DB.prepare('UPDATE OR REPLACE enrollments SET course = ? WHERE course = ?').bind(to, from));
+    statements.push(env.DB.prepare('UPDATE OR REPLACE course_meta SET course = ? WHERE course = ?').bind(to, from));
   }
   if (!single) statements.push(...(await youtubeMoveStatements(env, from, to)));
   statements.push(...(await orderMoveStatements(env, from, to, !!single)));
@@ -440,8 +441,11 @@ async function deleteEntry(env, rawPath, hooks) {
   }
 
   const statements = [...lessons].flatMap((k) => LESSON_DELETES.map((sql) => env.DB.prepare(sql).bind(k)));
-  // A deleted course must not keep granting access to nothing.
-  if (!single && !p.includes('/')) statements.push(env.DB.prepare('DELETE FROM enrollments WHERE course = ?').bind(p));
+  // A deleted course must not keep granting access to nothing, nor keep a description.
+  if (!single && !p.includes('/')) {
+    statements.push(env.DB.prepare('DELETE FROM enrollments WHERE course = ?').bind(p));
+    statements.push(env.DB.prepare('DELETE FROM course_meta WHERE course = ?').bind(p));
+  }
   // Saved positions go with the entry and, for a folder, with everything under it.
   // A folder prefix is matched as a range (p/ <= path < p0) instead of LIKE: D1's batch
   // endpoint rejects an ESCAPE'd LIKE pattern with "LIKE or GLOB pattern too complex",
@@ -471,6 +475,21 @@ async function createFolder(env, rawPath, hooks) {
   await env.RESOURCES.put(p + '/.keep', new Uint8Array());
   hooks.invalidate();
   return json({ ok: true });
+}
+
+const DESC_MAX = 2000;
+/** Sets (or clears) the description shown for a course, keyed by its top-level folder name. */
+async function setCourseDescription(env, rawCourse, rawDescription, hooks) {
+  const course = cleanPath(rawCourse);
+  if (course === null || !course || course.includes('/')) return bad('That is not a course name');
+  const description = typeof rawDescription === 'string'
+    ? rawDescription.replace(/\r\n/g, '\n').trim().slice(0, DESC_MAX)
+    : '';
+  await env.DB.prepare(
+    'INSERT INTO course_meta (course, description) VALUES (?, ?) ON CONFLICT(course) DO UPDATE SET description = excluded.description',
+  ).bind(course, description).run();
+  hooks.invalidate();
+  return json({ ok: true, course, description });
 }
 
 // ---- Uploads ----
@@ -630,6 +649,11 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/order' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return setEntryPosition(env, b.path, b.position, hooks);
+  }
+
+  if (path === '/api/admin/files/description' && method === 'POST') {
+    const b = await req.json().catch(() => ({}));
+    return setCourseDescription(env, b.course, b.description, hooks);
   }
 
   if (path === '/api/admin/files/folder' && method === 'POST') {

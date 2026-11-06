@@ -61,6 +61,8 @@ const SCHEMA = [
   // the default order (folders, then files, then YouTube; each by name). Positions are
   // per parent folder, so moving an item to another folder drops its old number.
   'CREATE TABLE IF NOT EXISTS content_order (path TEXT PRIMARY KEY, position INTEGER NOT NULL)',
+  // Owner-written course descriptions, keyed by the top-level folder name (the course).
+  "CREATE TABLE IF NOT EXISTS course_meta (course TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '')",
 ];
 let ready;
 // The owner comes from the Cloudflare secret ADMIN_EMAIL: the row is created on the first
@@ -233,6 +235,10 @@ async function listCourse(env) {
     (await env.DB.prepare('SELECT path, position FROM content_order').all()).results
       .map((r) => [String(r.path), Number(r.position)]),
   );
+  const descriptions = new Map(
+    (await env.DB.prepare('SELECT course, description FROM course_meta').all()).results
+      .map((r) => [String(r.course), String(r.description ?? '')]),
+  );
   // Numbered items come first, in their saved order; unnumbered ones keep the default
   // order (folders before files at the same level, then by name).
   const ordered = (aPath, aName, bPath, bName) => {
@@ -253,7 +259,7 @@ async function listCourse(env) {
         title: sectionName || null,
         lessons: lessons.sort((a, b) => ordered(a.id, a.title, b.id, b.title)),
       }));
-    return { title: courseName, sections };
+    return { title: courseName, description: descriptions.get(courseName) || '', sections };
   });
   cache = { at: Date.now(), data };
   return data;
@@ -456,6 +462,7 @@ const handle = async (req, env) => {
         const mine = await myCourses(env, u);
         return json((await listCourse(env)).filter((c) => !mine || mine.has(c.title)).map((c) => ({
           title: c.title,
+          description: c.description || '',
           sections: c.sections.map((s) => ({
             title: s.title,
             lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
