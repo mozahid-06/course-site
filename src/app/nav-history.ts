@@ -17,7 +17,7 @@ export class NavHistory {
   private readonly location = inject(Location);
   private readonly router = inject(Router);
 
-  /** Position of the current entry; -1 until the first navigation has settled. */
+  /** Position of the current entry; -1 until this service has seen one. */
   private index = -1;
   /** The highest position reached this session, so Forward knows when it ends. */
   private furthest = -1;
@@ -34,7 +34,9 @@ export class NavHistory {
   private tag(): void {
     const state = (history.state ?? {}) as Record<string, unknown>;
     const tagged = typeof state['__nav'] === 'number';
-    const index = tagged ? (state['__nav'] as number) : this.index + 1;
+    // A tagged entry is a restored one; otherwise it is a fresh entry. The first one
+    // we ever see is the screen the app started on, so it is position 0.
+    const index = tagged ? (state['__nav'] as number) : this.index < 0 ? 0 : this.index + 1;
     if (!tagged) history.replaceState({ ...state, __nav: index }, '');
     this.index = index;
     this.furthest = Math.max(this.furthest, index);

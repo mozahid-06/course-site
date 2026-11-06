@@ -1,7 +1,7 @@
 # Back/forward navigation with the Angular Router — design
 
 **Date:** 2026-11-06
-**Status:** Implemented on `dev/back-forward` (awaiting test-account review)
+**Status:** Implemented on `dev` (awaiting test-account review)
 
 ## Intent
 The course screens are one in-memory stack (`course list → folder(s) → lesson`)
