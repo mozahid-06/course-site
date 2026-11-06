@@ -443,10 +443,13 @@ async function deleteEntry(env, rawPath, hooks) {
   // A deleted course must not keep granting access to nothing.
   if (!single && !p.includes('/')) statements.push(env.DB.prepare('DELETE FROM enrollments WHERE course = ?').bind(p));
   // Saved positions go with the entry and, for a folder, with everything under it.
-  statements.push(env.DB.prepare("DELETE FROM content_order WHERE path = ? OR path LIKE ? ESCAPE '\\'").bind(p, likePath(p) + '/%'));
+  // A folder prefix is matched as a range (p/ <= path < p0) instead of LIKE: D1's batch
+  // endpoint rejects an ESCAPE'd LIKE pattern with "LIKE or GLOB pattern too complex",
+  // even though the identical statement runs fine on its own.
+  statements.push(env.DB.prepare('DELETE FROM content_order WHERE path = ? OR (path >= ? AND path < ?)').bind(p, p + '/', p + '0'));
   // A folder's YouTube lessons are D1 rows too; leaving them behind would make the deleted
   // folder (or course) reappear with its lessons intact.
-  statements.push(env.DB.prepare("DELETE FROM youtube_lessons WHERE id = ? OR id LIKE ? ESCAPE '\\'").bind(p, likePath(p) + '/%'));
+  statements.push(env.DB.prepare('DELETE FROM youtube_lessons WHERE id = ? OR (id >= ? AND id < ?)').bind(p, p + '/', p + '0'));
   try {
     await runChunks(env, statements);
   } catch (e) {
