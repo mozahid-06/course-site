@@ -1,4 +1,5 @@
 import { handleFiles } from './files.js';
+import { lessonOf, hourBucket, publicLesson } from './limits.js';
 import { YOUTUBE_LESSONS } from './youtube.js';
 
 const enc = new TextEncoder();
@@ -62,6 +63,10 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
+  // Distinct lessons a student opened in one hour bucket. In D1 so every Worker instance
+  // shares the count; a row is written only when a lesson is new for that hour.
+  'CREATE TABLE IF NOT EXISTS lesson_hits (user_id INTEGER NOT NULL, hour INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, hour, lesson))',
+  'CREATE INDEX IF NOT EXISTS idx_lesson_hits_hour ON lesson_hits(hour)',
   'CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson TEXT NOT NULL, user_id INTEGER NOT NULL, parent_id INTEGER, body TEXT NOT NULL, created INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS idx_comments_lesson ON comments(lesson, created)',
   'CREATE TABLE IF NOT EXISTS comment_likes (comment_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (comment_id, user_id))',
@@ -337,16 +342,21 @@ function mediaRequestOk(req, env) {
   if (env.RELAX_FETCH_METADATA) return true; // escape hatch for old browsers
   return site === 'same-origin' && ['video', 'audio', 'empty', 'track'].includes(dest);
 }
-// 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user per hour (per Worker instance).
-const seen = new Map();
-const lessonOf = (key) => (/\.(m3u8|ts|vtt)$/i.test(key) ? key.slice(0, key.lastIndexOf('/')) : key);
-function scraping(env, u, key) {
+// 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user
+//    per hour in D1, so the count is shared by every Worker instance. (The old in-memory
+//    Map lived in one isolate, so a scrape spread across isolates could dodge it.)
+const lessonLimit = (env) => Number(env.MAX_LESSONS_PER_HOUR || 20);
+async function scraping(env, u, key) {
   if (u.is_admin) return false;
-  const now = Date.now();
-  let e = seen.get(u.id);
-  if (!e || now - e.t > 36e5) { if (seen.size > 2000) seen.clear(); e = { t: now, s: new Set() }; seen.set(u.id, e); }
-  e.s.add(lessonOf(key));
-  return e.s.size > Number(env.MAX_LESSONS_PER_HOUR || 20);
+  const hour = hourBucket(Date.now());
+  // INSERT OR IGNORE only writes a row when this lesson is new for the hour, so the D1
+  // write volume tracks lessons opened, not media requests (HLS emits one per segment).
+  await env.DB.prepare('INSERT OR IGNORE INTO lesson_hits (user_id, hour, lesson) VALUES (?, ?, ?)').bind(u.id, hour, lessonOf(key)).run();
+  const row = await env.DB.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND hour = ?').bind(u.id, hour).first();
+  // Dead hour buckets are removed opportunistically (about one request in fifty) so no
+  // scheduled job is needed and the table stays small on the free plan.
+  if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM lesson_hits WHERE hour < ?').bind(hour - 1).run();
+  return Number(row && row.c) > lessonLimit(env);
 }
 
 // 3) Slow-down: video must be requested in ranges (browsers always do; a plain "download this URL" gets refused),
@@ -374,7 +384,7 @@ function reserve(env, u, bytes) {
 async function serve(req, env, key, u) {
   const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
   if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
-  if (scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
+  if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
   const isVideo = VIDEO_FILE.test(key);
   let range = req.headers;
   if (isVideo) {
