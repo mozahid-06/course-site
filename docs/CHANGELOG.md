@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Added (file manager)
+- **Admin → Course files now lists sections that exist only as YouTube lessons.** The list is built from R2 keys, so a section whose only content is a YouTube lesson — like `ক্লাস করার নিয়ম` (one YouTube video, no uploaded files) — was invisible to the admin even though students saw it in the course. The listing now derives those folders from the lesson ids (`childDirsFromIds` in `worker/files.js`) and shows them at their saved position, so the file view and the student course view agree. A real R2 folder of the same name still wins any clash.
+
+### Fixed (file manager)
+- **A folder that holds only YouTube lessons can now be deleted.** `deleteEntry` treated "no R2 keys and no student-data rows" as "Not found", so deleting such a folder answered `404` even though it was there; it now also counts the folder's `youtube_lessons` rows, so the delete removes the folder, its YouTube lessons and its saved positions. Position edits renumber these folders too, so the folder keeps unique numbers. Verified with `npm test`, `npm run typecheck`/`build`, and a live Worker pass: `ক্লাস করার নিয়ম` shows at `#1` in `GET /api/admin/files`, a scratch course's R2 folder + YouTube-only folder renumber to unique `1..2`, and deleting the YouTube-only scratch folder returns `ok` and clears its `youtube_lessons` row.
+
 ### Added (single-device login)
 - **A student account can now be signed in on only one device at a time.** The Worker stores one `sid` (session id) per user: every login writes a fresh random `sid` and puts it in the signed cookie, and `getUser` rejects a non-admin cookie whose `sid` no longer matches the row, so signing in on a new device immediately signs the old one out. Admins (and the owner) are exempt and keep working across devices. On deploy every existing student cookie (which has no `sid`) is rejected once — a one-time sign-out of current students. On the client, any `401` clears the local session back to the sign-in screen, and a `window focus` / `visibilitychange` handler re-checks the session so a device that is idle on the course list notices it was displaced. Verified with a live Worker pass (the second student login `401`s the first, the legacy pre-change cookie `401`s, two admin logins both stay `200`) and a headless Chromium check (the displaced device returns to sign-in on refocus; a network failure does not sign a live device out).
 
