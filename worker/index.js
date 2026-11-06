@@ -193,6 +193,13 @@ async function listCourse(env) {
   // files directly under course root go into section '' (no section)
   const courses = new Map();
   for (const key of keys) {
+    // A course is a top-level folder. Register it for any nested key, so a folder that
+    // holds only its `.keep` placeholder (a brand-new, empty course) is listed too.
+    const slash = key.indexOf('/');
+    if (slash > 0) {
+      const top = key.slice(0, slash);
+      if (!courses.has(top)) courses.set(top, new Map());
+    }
     if (/\.ts$/i.test(key)) continue; // skip HLS segments
     if (key.split('/').includes('_resources')) continue; // resource PDFs are not lessons
     const pdf = /\.pdf$/i.test(key), video = VIDEO_EXT.test(key);
