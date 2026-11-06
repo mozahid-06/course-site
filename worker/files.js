@@ -310,7 +310,15 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
 
   const single = await env.RESOURCES.head(from);
   const objects = single ? [single] : await listAll(env, from + '/');
-  if (!objects.length) return bad('Not found', 404);
+  if (!objects.length) {
+    // A folder can exist as YouTube lessons alone (no R2 objects). It is still movable: the
+    // move carries its rows via youtubeMoveStatements / orderMoveStatements below. Anything
+    // with neither objects nor YouTube rows is genuinely missing.
+    const yt = await env.DB.prepare(
+      'SELECT COUNT(*) n FROM youtube_lessons WHERE id >= ? AND id < ?',
+    ).bind(from + '/', from + '0').first();
+    if (!(yt && Number(yt.n) > 0)) return bad('Not found', 404);
+  }
   if (objects.length > 1000) return bad('That folder holds too many files to move in one go', 413);
 
   if (single) {
