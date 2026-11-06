@@ -208,7 +208,7 @@ export class App {
   protected readonly courseHits = computed<CourseData[]>(() => {
     const q = this.search.query().trim().toLowerCase();
     if (!q) return [];
-    return this.api.courses().filter((c) => c.title.toLowerCase().includes(q)).slice(0, 4);
+    return this.api.courses().filter((c) => !c.locked && c.title.toLowerCase().includes(q)).slice(0, 4);
   });
 
   /** Matching lessons across every course, each labelled with its full location. */

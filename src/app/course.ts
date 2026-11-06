@@ -129,7 +129,7 @@ type View =
           <div class="list cards">
             <h1 class="page-title">Courses</h1>
             @for (c of courseCards(); track c.title) {
-              <button class="course-card" (click)="openCourse(c)">
+              <button class="course-card" [disabled]="c.locked" (click)="openCourse(c)">
                 <span class="card-head">
                   <span class="row-glyph" aria-hidden="true">
                     <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" /><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20" /></svg>
@@ -143,7 +143,7 @@ type View =
                   }
                   <span class="card-meta-row">
                     <span class="row-meta">{{ courseDone(c) }}/{{ courseTotal(c) }} lessons</span>
-                    <span class="card-cta">{{ courseDone(c) ? 'Continue' : 'Start' }}</span>
+                    <span class="card-cta">{{ c.locked ? 'No access' : (courseDone(c) ? 'Continue' : 'Start') }}</span>
                   </span>
                 </span>
               </button>
@@ -179,7 +179,7 @@ export class Course {
       if (!req) return;
       this.search.request.set(null);
       const course = this.api.courses().find((c) => c.title === req.course);
-      if (!course) return;
+      if (!course || course.locked) return;
       this.activeCourseTitle.set(course.title);
       this.search.query.set('');
       this.search.expanded.set(false);
@@ -281,6 +281,7 @@ export class Course {
   });
 
   protected openCourse(c: CourseData): void {
+    if (c.locked) return;
     this.activeCourseTitle.set(c.title);
     this.search.query.set('');
     this.search.expanded.set(false);
