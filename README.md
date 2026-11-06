@@ -44,7 +44,7 @@ course-site/
 
 ## How the bucket maps to the site
 
-Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless you also change the binding).
+Bucket name: `<bucket-name>` (the spelling is in `wrangler.toml`; keep it unless you also change the binding).
 
 ```
 <Course>/<file>                     lesson directly in a course
@@ -128,7 +128,7 @@ rclone config update r2 \
   access_key_id=<R2_ACCESS_KEY_ID> secret_access_key=<R2_SECRET_ACCESS_KEY> \
   endpoint=https://<ACCOUNT_ID>.r2.cloudflarestorage.com provider=Cloudflare no_check_bucket=true
 
-rclone copy "/path/to/Course Name" "r2:course-sourse/Course Name" --progress
+rclone copy "/path/to/Course Name" "r2:<bucket-name>/Course Name" --progress
 ```
 
 Option A, plain MP4 (simple): make it stream-friendly first, because screen recordings usually keep the `moov` metadata at the end and the browser cannot start until the whole file downloads.
@@ -146,7 +146,7 @@ Uploads go **browser → R2** with presigned URLs, so the bucket must allow the 
 1. Push this project to GitHub/GitLab with `wrangler.toml` at the repo root. Commit `package-lock.json`.
 2. Cloudflare dashboard, Workers & Pages: create a Worker from the repo. Set the **Deploy command** to `npm run deploy` (build, deploy and bucket upload setup). The Worker name must be `course-site`.
 3. Workers Builds defaults to Node 24; this repo pins Node `24` in `.nvmrc` and `engines` (Angular 22 needs Node 22.22.3+ or 24.15+). Only set a `NODE_VERSION` build variable if you need to override the default.
-4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. For in-app uploads add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `course-sourse`) and optionally `R2_BUCKET`. Redeploy so the Worker sees them.
+4. After the first deploy, add Secrets under Settings, Variables and Secrets: `SESSION_SECRET` (random, 32+ characters) and `ADMIN_EMAIL` (the Owner, e.g. your Gmail). `ADMIN_PASSWORD` is optional — add it only if the Owner should also be able to sign in with a password. Set `GOOGLE_CLIENT_ID` for Google sign-in. For in-app uploads add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `<bucket-name>`) and optionally `R2_BUCKET`. Redeploy so the Worker sees them.
 5. Open the site and sign in as the Owner with **Continue with Google** (or `ADMIN_EMAIL` / `ADMIN_PASSWORD` if you set the password), then use **Admin panel** to add students.
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on the first request.
@@ -181,7 +181,10 @@ npm start                          # terminal 2: Angular on :4200, proxies /api 
 ```
 
 Seed local R2 for testing:
-`npx wrangler r2 object put "course-sourse/Demo/Notes.pdf" --file ./Notes.pdf --local`
+`npx wrangler r2 object put "<bucket-name>/Demo/Notes.pdf" --file ./Notes.pdf --local`
+
+Run the tests:
+`npm test` — pure helpers plus route-level security tests that drive the real Worker against an in-memory D1 (`node:sqlite`) and a fake R2.
 
 ## Look and feel
 

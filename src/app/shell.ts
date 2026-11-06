@@ -36,4 +36,12 @@ export class Shell {
     this.search.reset();
     await this.api.logout();
   }
+
+  /** Same local cleanup as signOut(), but ends every session for the account. */
+  async signOutEverywhere(): Promise<void> {
+    this.admin.set(false);
+    this.lessonOpen.set(false);
+    this.search.reset();
+    await this.api.logoutEverywhere();
+  }
 }

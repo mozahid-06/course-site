@@ -1,4 +1,5 @@
 import { handleFiles } from './files.js';
+import { lessonOf, hourBucket, publicLesson } from './limits.js';
 import { YOUTUBE_LESSONS } from './youtube.js';
 
 const enc = new TextEncoder();
@@ -62,6 +63,10 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
+  // Distinct lessons a student opened in one hour bucket. In D1 so every Worker instance
+  // shares the count; a row is written only when a lesson is new for that hour.
+  'CREATE TABLE IF NOT EXISTS lesson_hits (user_id INTEGER NOT NULL, hour INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, hour, lesson))',
+  'CREATE INDEX IF NOT EXISTS idx_lesson_hits_hour ON lesson_hits(hour)',
   'CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson TEXT NOT NULL, user_id INTEGER NOT NULL, parent_id INTEGER, body TEXT NOT NULL, created INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS idx_comments_lesson ON comments(lesson, created)',
   'CREATE TABLE IF NOT EXISTS comment_likes (comment_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (comment_id, user_id))',
@@ -337,16 +342,21 @@ function mediaRequestOk(req, env) {
   if (env.RELAX_FETCH_METADATA) return true; // escape hatch for old browsers
   return site === 'same-origin' && ['video', 'audio', 'empty', 'track'].includes(dest);
 }
-// 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user per hour (per Worker instance).
-const seen = new Map();
-const lessonOf = (key) => (/\.(m3u8|ts|vtt)$/i.test(key) ? key.slice(0, key.lastIndexOf('/')) : key);
-function scraping(env, u, key) {
+// 2) Scraping a whole course touches many lessons quickly. Cap distinct lessons per user
+//    per hour in D1, so the count is shared by every Worker instance. (The old in-memory
+//    Map lived in one isolate, so a scrape spread across isolates could dodge it.)
+const lessonLimit = (env) => Number(env.MAX_LESSONS_PER_HOUR || 20);
+async function scraping(env, u, key) {
   if (u.is_admin) return false;
-  const now = Date.now();
-  let e = seen.get(u.id);
-  if (!e || now - e.t > 36e5) { if (seen.size > 2000) seen.clear(); e = { t: now, s: new Set() }; seen.set(u.id, e); }
-  e.s.add(lessonOf(key));
-  return e.s.size > Number(env.MAX_LESSONS_PER_HOUR || 20);
+  const hour = hourBucket(Date.now());
+  // INSERT OR IGNORE only writes a row when this lesson is new for the hour, so the D1
+  // write volume tracks lessons opened, not media requests (HLS emits one per segment).
+  await env.DB.prepare('INSERT OR IGNORE INTO lesson_hits (user_id, hour, lesson) VALUES (?, ?, ?)').bind(u.id, hour, lessonOf(key)).run();
+  const row = await env.DB.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND hour = ?').bind(u.id, hour).first();
+  // Dead hour buckets are removed opportunistically (about one request in fifty) so no
+  // scheduled job is needed and the table stays small on the free plan.
+  if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM lesson_hits WHERE hour < ?').bind(hour - 1).run();
+  return Number(row && row.c) > lessonLimit(env);
 }
 
 // 3) Slow-down: video must be requested in ranges (browsers always do; a plain "download this URL" gets refused),
@@ -374,7 +384,7 @@ function reserve(env, u, bytes) {
 async function serve(req, env, key, u) {
   const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
   if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
-  if (scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
+  if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
   const isVideo = VIDEO_FILE.test(key);
   let range = req.headers;
   if (isVideo) {
@@ -391,7 +401,9 @@ async function serve(req, env, key, u) {
   const h = new Headers();
   h.set('content-type', MEDIA_TYPES[key.split('.').pop().toLowerCase()] || 'application/octet-stream');
   h.set('accept-ranges', 'bytes');
-  h.set('cache-control', /\.pdf$/i.test(key) ? 'private, max-age=3600' : 'private, no-store');
+  // Nothing from the media route is cacheable: a browser that keeps the bytes keeps a copy
+  // the site cannot account for. PDF.js still streams range requests, so it stays quick.
+  h.set('cache-control', 'private, no-store');
   h.set('x-content-type-options', 'nosniff');
   h.set('content-disposition', 'inline');
   h.set('cross-origin-resource-policy', 'same-origin');
@@ -415,13 +427,19 @@ const SEC_HEADERS = {
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
   'referrer-policy': 'strict-origin-when-cross-origin',
-  'strict-transport-security': 'max-age=31536000',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
 };
 
 export default {
   async fetch(req, env) {
+    // Fail closed when the session secret is missing or too short: without a strong secret
+    // the signed session cookie cannot be trusted. The reply is generic and never names the
+    // variable or its value.
+    if (!env.SESSION_SECRET || String(env.SESSION_SECRET).length < 32) {
+      return json({ error: 'Server error' }, 500);
+    }
     const url = new URL(req.url);
     // CSRF defense in depth: state-changing API calls must come from this site
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -467,8 +485,15 @@ const handle = async (req, env) => {
         const em = String(email || '').trim().toLowerCase();
         const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40]];
         if (await locked(env, keys)) return tooMany();
+        const pass = String(password || '');
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
-        if (!u || !(await checkPw(String(password || ''), u.pass))) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
+        // Spend one PBKDF2 derive even when the email is unknown, and when the account has no
+        // usable password (Google-only sign-in), so the response time does not reveal which
+        // emails exist. The error message stays identical in every case.
+        let ok = false;
+        if (u && u.pass.includes('.')) ok = await checkPw(pass, u.pass);
+        else await derive(pass, crypto.getRandomValues(new Uint8Array(16)));
+        if (!ok) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
         return json({ ok: true }, 200, { 'set-cookie': await startSession(env, u, secure) });
       }
       if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
@@ -477,6 +502,13 @@ const handle = async (req, env) => {
       if (!u) return json({ error: 'Not logged in' }, 401);
 
       if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin });
+      // "Sign out everywhere": bump the session version so every cookie minted before now
+      // fails getUser, then clear this device's cookie too. Available to any user (admins
+      // included) as the least disruptive alternative to forcing single-device login on admins.
+      if (path === '/api/logout/all' && m === 'POST') {
+        await env.DB.prepare('UPDATE users SET ver = ver + 1 WHERE id = ?').bind(u.id).run();
+        return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
+      }
       if (path === '/api/course') {
         const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
         const mine = await myCourses(env, u);
@@ -490,10 +522,25 @@ const handle = async (req, env) => {
             locked,
             sections: locked ? [] : c.sections.map((s) => ({
               title: s.title,
-              lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
+              // publicLesson() drops the YouTube id: ids are fetched one at a time from
+              // /api/lesson/<id>/yt, so the whole-course response cannot be scraped for them.
+              lessons: s.lessons.map((l) => publicLesson(l, w.has(l.id))),
             })),
           };
         }));
+      }
+      // The YouTube id for one lesson, fetched when the lesson opens. Admins and students go
+      // through the same check as media: lessonAccess, then the per-hour lesson limit. Only a
+      // YouTube lesson the user may open answers; anything else is a 404.
+      if (path.startsWith('/api/lesson/') && path.endsWith('/yt')) {
+        const key = decodeURIComponent(path.slice('/api/lesson/'.length, -'/yt'.length));
+        const access = await lessonAccess(env, u, key);
+        if (access !== 'ok') return accessError(access);
+        const course = (await listCourse(env)).find((c) => c.title === courseOf(key));
+        const lesson = course && course.sections.flatMap((s) => s.lessons).find((l) => l.id === key);
+        if (!lesson || lesson.kind !== 'youtube' || !lesson.yt) return json({ error: 'Not found' }, 404);
+        if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
+        return json({ yt: lesson.yt }, 200, { 'cache-control': 'no-store' });
       }
       // Position numbers the student browser shows: path -> number. A course-level row
       // is public (so the catalog sorts the same for everyone); a lesson-level row is
@@ -542,6 +589,10 @@ const handle = async (req, env) => {
       }
       if (path === '/api/progress' && m === 'POST') {
         const { lesson, done } = await req.json();
+        // Same rule as comments/notes/resources: the lesson must exist and the student must
+        // be granted its course. lessonAccess also caps the key at 500 characters.
+        const access = await lessonAccess(env, u, lesson);
+        if (access !== 'ok') return accessError(access);
         await env.DB.prepare(done ? 'INSERT OR IGNORE INTO watched (user_id, lesson) VALUES (?, ?)' : 'DELETE FROM watched WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
         return json({ ok: true });
       }

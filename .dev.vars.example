@@ -2,7 +2,7 @@
 # SESSION_SECRET must be a random string of 32+ characters.
 SESSION_SECRET=replace-with-a-random-32-char-secret
 # The Owner is created from ADMIN_EMAIL on the first request and signs in with Google.
-ADMIN_EMAIL=you@gmail.com
+ADMIN_EMAIL=you@example.com
 # Optional: also allow email + password for the Owner (remove it to make the Owner Google-only).
 ADMIN_PASSWORD=replace-with-a-strong-password
 
@@ -25,4 +25,4 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 # R2_ACCOUNT_ID=0123456789abcdef0123456789abcdef
 # R2_ACCESS_KEY_ID=replace-with-the-access-key-id
 # R2_SECRET_ACCESS_KEY=replace-with-the-secret-access-key
-# R2_BUCKET=course-sourse
+# R2_BUCKET=<bucket-name>

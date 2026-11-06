@@ -248,7 +248,7 @@ Expected: `Deployed course-site triggers … Current Version ID: <new id>`.
 Run: `bash /tmp/opencode/mk-test-admin.sh` (recreates `uitest-tmp@example.com` / `UiTest-Pass-123!`). Then:
 
 ```bash
-BASE=https://course-site.cspg.workers.dev
+BASE=https://<your-site>.workers.dev
 ADMIN=$(curl -s -i -X POST "$BASE/api/login" -H 'content-type: application/json' \
   -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' \
   | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
@@ -310,7 +310,7 @@ Delete the throwaway admin (and any `zz-scratch` leftovers) and confirm the owne
 ```bash
 npx wrangler d1 execute course-db --remote --command "DELETE FROM users WHERE email LIKE 'uitest%'"
 npx wrangler d1 execute course-db --remote --json --command \
-  "SELECT email, is_admin FROM users WHERE email = 'mbthunter007@gmail.com'"
+  "SELECT email, is_admin FROM users WHERE email = 'you@example.com'"
 ```
 
 ```bash

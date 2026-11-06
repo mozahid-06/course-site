@@ -210,10 +210,13 @@ button.media-cover{cursor:pointer}
 .media-cover:focus-visible{outline:3px solid #93c5fd;outline-offset:-3px}
 .media-cover svg{position:absolute;inset:0;margin:auto;width:clamp(40px,11%,64px);height:auto;color:rgba(255,255,255,.9);filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
 .media-cover .spin{position:absolute;inset:0;margin:auto;width:clamp(30px,9%,44px);aspect-ratio:1;border:3px solid rgba(255,255,255,.22);border-top-color:rgba(255,255,255,.92);border-radius:50%;animation:media-spin .9s linear infinite}
+.media-cover .yt-msg{position:absolute;inset:0;margin:auto;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;font-size:15px;line-height:1.5;color:rgba(255,255,255,.92)}
 @keyframes media-spin{to{transform:rotate(1turn)}}
 @media (prefers-reduced-motion:reduce){.media-cover .spin{animation-duration:2.4s}}
 .vw iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#000}
 .wm{position:absolute;z-index:50;pointer-events:none;user-select:none;color:rgba(255,255,255,.35);font-size:14px;text-shadow:0 0 3px rgba(0,0,0,.6);transition:all 1s}
+/* PDF pages are usually light, so the watermark uses a dark translucent ink instead. */
+.wm.pdf{color:rgba(15,23,42,.3);text-shadow:0 0 3px rgba(255,255,255,.55)}
 @media (min-width:1100px){
   .player-body:not(:has(> app-pdf-viewer)){display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:minmax(0,1fr);gap:1rem;overflow:hidden}
   .player-body:not(:has(> app-pdf-viewer))>:is(app-player,app-yt-player,app-lesson-panel){min-width:0;min-height:0}

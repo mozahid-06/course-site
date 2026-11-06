@@ -9,6 +9,8 @@ out-tsc/
 # wrangler / Cloudflare local state and secrets
 .wrangler/
 .dev.vars
+.env
+.env.*
 
 # course media (uploaded with rclone, never through git)
 videos/
