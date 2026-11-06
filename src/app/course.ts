@@ -8,6 +8,7 @@ import { LessonPanel } from './lesson-panel';
 import { Shell } from './shell';
 import { OptionsMenu } from './options-menu';
 import { NotesControls } from './notes-controls';
+import { statusMark, type StatusMark } from './lesson-status';
 
 type View =
   | { kind: 'browser'; courseTitle: string; path: string[] }
@@ -43,6 +44,15 @@ type View =
           <!-- File browser -->
           @if (v.kind === 'browser') {
             <div class="browser">
+              <svg class="fb-defs" aria-hidden="true">
+                <defs>
+                  <mask id="fb-check-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+                    <rect width="24" height="24" fill="#fff" />
+                    <path d="m7 12.6 3.2 3.2L17 8" fill="none" stroke="#000" stroke-width="2.4"
+                      stroke-linecap="round" stroke-linejoin="round" />
+                  </mask>
+                </defs>
+              </svg>
               @for (item of browserItems(); track item.id) {
                 <button class="fb-item" (click)="onItemClick(item)">
                   <span class="fb-pos" aria-hidden="true">{{ item.index }}</span>
@@ -58,8 +68,16 @@ type View =
                     }
                   </span>
                   <span class="fb-name">{{ item.name }}</span>
-                  @if (item.kind !== 'folder' && item.done) {
-                    <span class="fb-done" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg></span>
+                  @if (item.mark !== 'none') {
+                    <span class="fb-done" [class.is-done]="item.mark === 'done'" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        @if (item.mark === 'done') {
+                          <circle class="disc" cx="12" cy="12" r="10" mask="url(#fb-check-cut)" />
+                        } @else {
+                          <circle class="ring" cx="12" cy="12" r="10" />
+                        }
+                      </svg>
+                    </span>
                   }
                 </button>
               } @empty {
@@ -233,7 +251,7 @@ export class Course {
     const currentPath = v.path; // e.g. [] = course root, ['Section'] = inside section
     const here = [course.title, ...currentPath].join('/');
 
-    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'youtube' | 'folder'; done: boolean };
+    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'youtube' | 'folder'; done: boolean; mark: StatusMark };
     // A folder shows up in every section below it, so key the rows by path to keep one.
     const rows = new Map<string, Row>();
 
@@ -250,13 +268,13 @@ export class Course {
       if (depth === 0) {
         // Files directly at this level
         for (const l of section.lessons) {
-          rows.set(l.id, { id: l.id, path: l.id, name: l.title, kind: l.kind, done: l.done });
+          rows.set(l.id, { id: l.id, path: l.id, name: l.title, kind: l.kind, done: l.done, mark: statusMark(l.kind, l.done) });
         }
       } else if (depth > 0) {
         // Next folder level
         const name = sectionParts[currentPath.length];
         const path = `${here}/${name}`;
-        rows.set(path, { id: 'folder:' + name, path, name, kind: 'folder', done: false });
+        rows.set(path, { id: 'folder:' + name, path, name, kind: 'folder', done: false, mark: 'none' });
       }
     }
 
