@@ -468,7 +468,12 @@ async function deleteEntry(env, rawPath, hooks) {
       lessons.add(row.file_key);
     }
   }
-  if (!keys.length && !lessons.size) {
+  // A folder that holds only YouTube lessons has no R2 keys and no student-data rows, so
+  // the guard below would 404 it. Its `youtube_lessons` rows are the "something is here".
+  const yt = await env.DB.prepare(
+    'SELECT COUNT(*) n FROM youtube_lessons WHERE id = ? OR (id >= ? AND id < ?)',
+  ).bind(p, p + '/', p + '0').first();
+  if (!keys.length && !lessons.size && !yt.n) {
     if (p.includes('/') || single) return bad('Not found', 404);
     // A course row can outlive a partial cleanup: enrollments and course_meta are separate
     // batches, so a failed delete can leave one behind. Treat either as "something is still
