@@ -31,23 +31,34 @@ async function getUser(req, env) {
   if (!sig || !safeEq(sig, await hmac(env.SESSION_SECRET, p))) return null;
   const d = JSON.parse(new TextDecoder().decode(unb64(p)));
   if (d.exp < Date.now()) return null;
-  const u = await env.DB.prepare('SELECT id, email, is_admin, ver FROM users WHERE id = ?').bind(d.uid).first();
+  const u = await env.DB.prepare('SELECT id, email, is_admin, ver, sid FROM users WHERE id = ?').bind(d.uid).first();
   // 'ver' changes on password reset / role change, which signs the user out everywhere
-  return u && (d.v || 0) === u.ver ? u : null;
+  if (!u || (d.v || 0) !== u.ver) return null;
+  // Students: the cookie must carry the account's current session id, so a newer
+  // login (or a cookie from before this feature) is rejected. Admins are exempt.
+  if (!u.is_admin && (!d.sid || d.sid !== u.sid)) return null;
+  return u;
 }
 // 'Secure' is only sent over HTTPS: browsers reject a Secure cookie on a plain-HTTP
 // origin (e.g. the dev server over http://192.168.0.101:4200), which made the login
 // appear to do nothing on a phone while localhost — treated as trustworthy — worked.
 async function sessionCookie(u, env, secure) {
-  const p = b64(enc.encode(JSON.stringify({ uid: u.id, v: u.ver || 0, exp: Date.now() + 7 * 864e5 })));
+  const p = b64(enc.encode(JSON.stringify({ uid: u.id, v: u.ver || 0, sid: u.sid || '', exp: Date.now() + 7 * 864e5 })));
   return `s=${p}.${await hmac(env.SESSION_SECRET, p)}; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=604800`;
+}
+// A new login becomes the only live session for that account: a fresh random id
+// replaces the stored one, so every cookie minted earlier fails getUser.
+async function startSession(env, u, secure) {
+  const sid = crypto.randomUUID();
+  await env.DB.prepare('UPDATE users SET sid = ? WHERE id = ?').bind(sid, u.id).run();
+  return sessionCookie({ ...u, sid }, env, secure);
 }
 function clearCookie(secure) {
   return `s=; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=0`;
 }
 
 const SCHEMA = [
-  'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0)',
+  'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, sid TEXT)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
@@ -92,6 +103,8 @@ async function migrate(env) {
   if (!has.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
   const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
   if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
+  const hasSid = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'sid'").first();
+  if (!hasSid.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN sid TEXT').run();
   const hasResKind = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'kind'").first();
   if (!hasResKind.c) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
   const hasResFile = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'file_key'").first();
@@ -447,7 +460,7 @@ const handle = async (req, env) => {
           if (u.google_sub && u.google_sub !== c.sub) return json({ error: 'This email is linked to a different Google account' }, 403);
           await env.DB.prepare('UPDATE users SET google_sub = ? WHERE id = ?').bind(c.sub, u.id).run();
         }
-        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env, secure) });
+        return json({ ok: true }, 200, { 'set-cookie': await startSession(env, u, secure) });
       }
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
@@ -456,7 +469,7 @@ const handle = async (req, env) => {
         if (await locked(env, keys)) return tooMany();
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
         if (!u || !(await checkPw(String(password || ''), u.pass))) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
-        return json({ ok: true }, 200, { 'set-cookie': await sessionCookie(u, env, secure) });
+        return json({ ok: true }, 200, { 'set-cookie': await startSession(env, u, secure) });
       }
       if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
 
