@@ -151,6 +151,19 @@ Uploads go **browser → R2** with presigned URLs, so the bucket must allow the 
 
 The D1 database and R2 bucket are created automatically on first deploy; tables are created on the first request.
 
+### Owning a branch to an account
+
+If your Wrangler login can see more than one Cloudflare account (for example a production account and a test account), `npm run deploy`, `npm run doctor` and `npm run setup:r2` need to know which one this branch belongs to. Copy `.cloudflare-accounts.example.json` to `.cloudflare-accounts.json` (gitignored, so the ids never leave your machine) and map each branch:
+
+```json
+{
+  "main": { "id": "<production-account-id>", "name": "production" },
+  "dev":  { "id": "<test-account-id>", "name": "test" }
+}
+```
+
+The account is chosen in this order: `CLOUDFLARE_ACCOUNT_ID` (what CI uses), then the current git branch in `.cloudflare-accounts.json`, then Wrangler's own login when it sees exactly one account. `npm run doctor` prints which branch/account it picked. Workers Builds supplies its own account context, so the file is only needed for local deploys.
+
 ### Upload setup commands
 
 | Command | What it does |

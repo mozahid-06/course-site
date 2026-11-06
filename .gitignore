@@ -12,6 +12,9 @@ out-tsc/
 .env
 .env.*
 
+# local branch -> Cloudflare account ids for `npm run deploy` (never commit ids)
+.cloudflare-accounts.json
+
 # course media (uploaded with rclone, never through git)
 videos/
 hls/

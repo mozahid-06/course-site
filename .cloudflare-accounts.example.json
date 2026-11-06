@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy to .cloudflare-accounts.json (gitignored). Maps a git branch to the Cloudflare account it deploys to, so `npm run deploy` never has to guess between accounts. CI and `CLOUDFLARE_ACCOUNT_ID` override this file.",
+  "main": { "id": "<production-account-id>", "name": "<production-account-name>" },
+  "dev": { "id": "<dev-account-id>", "name": "<dev-account-name>" }
+}
