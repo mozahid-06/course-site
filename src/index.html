@@ -6,6 +6,8 @@
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <!-- Start the connection to Google's sign-in host before the login view mounts. -->
+  <link rel="preconnect" href="https://accounts.google.com">
   <script>
     // Paint the stored theme before the first frame; leave <html> bare when the
     // user has never chosen so the stylesheet can follow prefers-color-scheme.

@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Fixed (login)
+- **The Google sign-in button now appears with the rest of the form instead of ~0.5s later.** The button can only render once `/api/config` returns and Google's `gsi/client` script has loaded, and the old code then held it back another 500ms for a fade-in (`setTimeout` + a 0.3s opacity transition), so the centred form visibly grew after the email/password fields. `GET /api/config` is now fetched once at app start and cached in `Api`, the `or` divider and the button slot are shown as soon as the client id is known (reserving the space, so the form no longer jumps), and the artificial delay and fade are gone; a `preconnect` to `accounts.google.com` warms the connection so Google's script is quicker to render into the slot. The sign-in flow itself is unchanged. Verified headlessly on a logged-out load: the option is visible within 2ms of the form (was ~580ms) and the `fade` class is never used.
+
 ### Fixed (lesson bar)
 - **The options-menu hamburger sits on the right in the lesson bar, like everywhere else.** The player bar placed `<app-options-menu />` before the **Mark as complete** button, so the hamburger read as a left-hand control while the header, the Admin Users toolbar and the Course-files toolbar all put it last (rightmost). It is now the last element of the lesson bar, so the menu is consistently on the right on desktop and phone. Verified headlessly: the bar order is `back-btn · player-title · done-btn · app-options-menu` and the menu's left edge is to the right of the complete button's.
 
@@ -33,7 +36,7 @@
 - **Course and folder rows share the file manager's separators and height.** The course list and folder browser now use the shared 40px desktop / 44px phone row height with a 1px bottom border, so all three lists read alike.
 - **The site opens on the course list (the home screen).** The pre-reboot effect that auto-opened a student's single course was removed; students land on the course list and tap in.
 - **The in-app PDF *Full window* control was removed as unused** — the button in `notes-controls.ts`, the `fullWindow` input and `expanded` state / Escape handler in `pdf-viewer.ts`, the `[fullWindow]="false"` binding in `lesson-resources.ts`, and the `.expanded` CSS. The PDF.js toolbar's own fullscreen button is untouched.
-- **Sign-in: the Google option aligns with the fields and does not appear instantly.** The Google button now spans the full form width (it was centred and narrower, from a `- 56px` width), so it lines up with Email / Password / Sign in. The `or` divider and the button start hidden at mount and fade in 0.5s later, instead of appearing at once.
+- **Sign-in: the Google option aligns with the fields.** The Google button now spans the full form width (it was centred and narrower, from a `- 56px` width), so it lines up with Email / Password / Sign in.
 
 ### Added (lesson resources)
 - **PDF resources on video and YouTube lessons.** The Resources tab's admin form now switches **Link | PDF**: the PDF is uploaded with an optional note (title defaults to the file name, 25 MB cap, `%PDF-` checked) and listed like a link. A PDF row opens the shared in-app reader in a full-window modal, not a new tab. Resource PDFs are stored in `<Course>/_resources/<uuid>.pdf`, which `listCourse` and the file manager skip, so they never appear as lessons. They reuse `/api/media` and `/api/notes`, so enrollment checks and each student's private annotations are exactly those of a PDF lesson.

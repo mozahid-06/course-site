@@ -31,6 +31,10 @@ export class Api {
   /** Admin-chosen positions by path, for the student browser's number labels. */
   readonly order = signal<Record<string, number>>({});
 
+  /** Public config, fetched once. Kept so the login form does not wait on a second call. */
+  private configReq?: Promise<{ googleClientId: string }>;
+  private googleCfg?: { googleClientId: string };
+
   private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
     const res = await fetch('/api/' + path, body === undefined && !method ? {} : {
       method: method ?? 'POST',
@@ -50,6 +54,10 @@ export class Api {
   }
 
   async init(): Promise<void> {
+    // Ask for the public config alongside the session check, so the login form already
+    // has the Google client id the moment it mounts and its button can render with the
+    // email/password fields instead of a moment later.
+    this.configReq ??= this.req<{ googleClientId: string }>('config').catch(() => ({ googleClientId: '' }));
     try {
       this.me.set(await this.req<Me>('me'));
       this.courses.set(await this.req<CourseData[]>('course'));
@@ -66,7 +74,11 @@ export class Api {
 
   /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
   async googleClientId(): Promise<string> {
-    try { return (await this.req<{ googleClientId: string }>('config')).googleClientId; } catch { return ''; }
+    if (!this.googleCfg) {
+      this.configReq ??= this.req<{ googleClientId: string }>('config').catch(() => ({ googleClientId: '' }));
+      this.googleCfg = await this.configReq;
+    }
+    return this.googleCfg.googleClientId;
   }
 
   async loginGoogle(credential: string): Promise<void> {
