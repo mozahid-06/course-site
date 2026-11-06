@@ -211,14 +211,14 @@ async function orderMoveStatements(env, from, to, single) {
   return out;
 }
 
-/** Escapes a path for use as the literal start of a LIKE pattern. */
-const likePath = (p) => p.replace(/[\\%_]/g, '\\$&');
-
 /** A folder's YouTube lessons are D1 rows, so a folder move has to carry them too. */
 async function youtubeMoveStatements(env, from, to) {
+  // Match the folder's subtree as a plain range (from/ <= id < from0) instead of LIKE: D1
+  // rejects a LIKE pattern longer than ~50 chars with "LIKE or GLOB pattern too complex", and
+  // a long or unicode section name plus its parent prefix exceeds that easily.
   const rows = (await env.DB.prepare(
-    "SELECT id, yt, created FROM youtube_lessons WHERE id LIKE ? ESCAPE '\\'",
-  ).bind(likePath(from) + '/%').all()).results || [];
+    'SELECT id, yt, created FROM youtube_lessons WHERE id >= ? AND id < ?',
+  ).bind(from + '/', from + '0').all()).results || [];
   return rows.flatMap((row) => {
     const id = String(row.id);
     const next = to + id.slice(from.length);
@@ -314,11 +314,11 @@ async function moveEntry(env, rawFrom, rawTo, hooks) {
   // deleting the old objects.
   if (!single) {
     const sourceYt = await env.DB.prepare(
-      "SELECT COUNT(*) n FROM youtube_lessons WHERE id LIKE ? ESCAPE '\\'",
-    ).bind(likePath(from) + '/%').first();
+      'SELECT COUNT(*) n FROM youtube_lessons WHERE id >= ? AND id < ?',
+    ).bind(from + '/', from + '0').first();
     const destYt = await env.DB.prepare(
-      "SELECT COUNT(*) n FROM youtube_lessons WHERE id = ? OR id LIKE ? ESCAPE '\\'",
-    ).bind(to, likePath(to) + '/%').first();
+      'SELECT COUNT(*) n FROM youtube_lessons WHERE id = ? OR (id >= ? AND id < ?)',
+    ).bind(to, to + '/', to + '0').first();
     if (Number(sourceYt && sourceYt.n) > 0 && Number(destYt && destYt.n) > 0) {
       return bad('Something already exists at ' + to, 409);
     }
