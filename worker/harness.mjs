@@ -6,8 +6,31 @@ const enc = new TextEncoder();
 const b64 = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /**
+ * Normalise whatever the Worker passes as `range`: a Headers instance (the raw
+ * request headers used for non-video media), a `{ offset, length }` object, or a
+ * `bytes=start-end` string. Returns null when there is no usable range.
+ */
+function readRange(range) {
+  if (!range) return null;
+  if (typeof range.get === 'function') {
+    const header = range.get('range');
+    return header ? readRange(header) : null;
+  }
+  if (typeof range === 'string') {
+    const m = /^bytes=(\d+)-(\d*)$/.exec(range);
+    if (!m) return null;
+    const start = Number(m[1]);
+    const end = m[2] === '' ? Infinity : Number(m[2]);
+    return { offset: start, length: end - start + 1 };
+  }
+  if (typeof range.suffix === 'number') return { suffix: range.suffix };
+  if (typeof range.offset === 'number') return { offset: range.offset, length: range.length ?? Infinity };
+  return null;
+}
+
+/**
  * A fake R2 bucket. `files` maps an object key to a string (encoded as UTF-8) or raw bytes.
- * It implements the two methods the Worker uses: `list` (paged) and `get`.
+ * It implements the two methods the Worker uses: `list` (paged) and `get` (with ranges).
  */
 export function r2(files = {}) {
   const map = new Map(Object.entries(files).map(([key, value]) => [key, typeof value === 'string' ? enc.encode(value) : value]));
@@ -22,10 +45,22 @@ export function r2(files = {}) {
         cursor: page.at(-1),
       };
     },
-    async get(key) {
+    async get(key, { range } = {}) {
       if (!map.has(key)) return null;
       const bytes = map.get(key);
-      return { body: bytes, size: bytes.length };
+      const total = bytes.length;
+      const spec = readRange(range);
+      if (!spec) return { body: bytes, size: total };
+      let offset = 0;
+      let length = total;
+      if (spec.suffix != null) {
+        offset = Math.max(0, total - spec.suffix);
+        length = total - offset;
+      } else {
+        offset = Math.min(spec.offset, total);
+        length = Math.max(0, Math.min(spec.length, total - offset));
+      }
+      return { body: bytes.subarray(offset, offset + length), size: total, range: { offset, length } };
     },
   };
 }

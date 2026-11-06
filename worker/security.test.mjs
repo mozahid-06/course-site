@@ -18,6 +18,7 @@ const STUDENT_PW = 'student-pass-1';
 const FILES = {
   'Course/notes.pdf': '%PDF-1.4\nCourse notes',
   'Course/clip.mp4': new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
+  'Course/big.mp4': new Uint8Array(5 * 1024 * 1024),
   'Other/hidden.pdf': '%PDF-1.4\nOther course',
 };
 
@@ -106,9 +107,64 @@ test('media: the browser gate and the range-only rule are enforced', async () =>
   assert.equal((await call('/api/media/Course/notes.pdf', { headers: browser(cookie, 'document') })).status, 403);
   // A normal in-page fetch is served.
   assert.equal((await call('/api/media/Course/notes.pdf', { headers: browser(cookie) })).status, 200);
-  // Video without a Range header is refused; with one it is served.
+  // Video without a Range header is refused; with one it is served (206, not 200).
   assert.equal((await call('/api/media/Course/clip.mp4', { headers: browser(cookie, 'video') })).status, 403);
-  assert.equal((await call('/api/media/Course/clip.mp4', { headers: { ...browser(cookie, 'video'), range: 'bytes=0-' } })).status, 200);
+  assert.equal((await call('/api/media/Course/clip.mp4', { headers: { ...browser(cookie, 'video'), range: 'bytes=0-' } })).status, 206);
+});
+
+test('media: only a single well-formed Range is served; anything else is refused', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const video = (range) => call('/api/media/Course/clip.mp4', { headers: { ...browser(cookie, 'video'), range } });
+  // Ranges that used to fall through to R2 (which returns the whole object) now 416.
+  assert.equal((await video('bytes=-500')).status, 416, 'a suffix range is refused');
+  assert.equal((await video('bytes=5-2')).status, 416, 'end before start is refused');
+  assert.equal((await video('bytes=0-1,3-4')).status, 416, 'a multi-range is refused');
+  assert.equal((await video('bytes=abc')).status, 416, 'junk is refused');
+  assert.equal((await video('bytes=')).status, 416, 'an empty range is refused');
+  assert.equal((await video('bytes=0-100')).status, 206, 'a normal range is still served');
+});
+
+test('media: a range larger than one chunk is capped', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const res = await call('/api/media/Course/big.mp4', { headers: { ...browser(cookie, 'video'), range: 'bytes=0-' } });
+  assert.equal(res.status, 206);
+  assert.equal(Number(res.headers.get('content-length')), 4 * 1024 * 1024, 'one chunk, not the whole file');
+  const tail = await call('/api/media/Course/big.mp4', { headers: { ...browser(cookie, 'video'), range: 'bytes=100000-6000000' } });
+  assert.equal(Number(tail.headers.get('content-length')), 4 * 1024 * 1024, 'an oversized explicit range is capped too');
+});
+
+test('PDF notes: only a real PDF lesson or a real resource PDF is accepted', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const headers = { cookie, 'content-type': 'application/json' };
+  const put = (key, data) => call('/api/notes/' + key.split('/').map(encodeURIComponent).join('/'), { method: 'PUT', headers, body: JSON.stringify({ data }) });
+
+  assert.equal((await put('Course/notes.pdf', [{ x: 1 }])).status, 200, 'a real PDF lesson is accepted');
+  assert.equal((await put('Course/made-up.pdf', [{ x: 1 }])).status, 404, 'an invented key is refused');
+
+  raw.prepare("INSERT INTO resources (lesson, title, url, note, created_by, created, kind, file_key) VALUES ('Course/notes.pdf','R','',NULL,1,?, 'pdf', 'Course/_resources/real.pdf')").run(Date.now());
+  assert.equal((await put('Course/_resources/real.pdf', [{ x: 2 }])).status, 200, 'a resource PDF is accepted');
+  const rows = raw.prepare('SELECT COUNT(*) c FROM pdf_notes').get().c;
+  assert.equal(rows, 2, 'only the two real PDFs got a row');
+  raw.prepare("DELETE FROM resources WHERE file_key = 'Course/_resources/real.pdf'").run();
+});
+
+test('PDF notes are limited by bytes, not characters', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const headers = { cookie, 'content-type': 'application/json' };
+  const put = (data) => call('/api/notes/Course/notes.pdf', { method: 'PUT', headers, body: JSON.stringify({ data }) });
+
+  const under = 'ক'.repeat(400000); // 1.2 MB in UTF-8
+  assert.equal((await put([under])).status, 200, 'a 1.2 MB payload is saved');
+  const over = 'ক'.repeat(500001); // 1,500,003 bytes, but only 500,001 characters
+  assert.equal((await put([over])).status, 413, 'a payload over 1.5 MB in bytes is refused');
 });
 
 test('media: a student only reaches courses they are enrolled in', async () => {

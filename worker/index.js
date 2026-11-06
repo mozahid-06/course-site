@@ -366,6 +366,19 @@ async function scraping(env, u, key) {
 const CHUNK = 4 * 1024 * 1024;
 const VIDEO_FILE = /\.(mp4|webm|mkv|mov|avi|m4v)$/i;
 const buckets = new Map();
+// Only a single, well-formed byte range is served: "bytes=start-end" (end optional)
+// with end >= start. Anything else — a suffix "-N", a multi-range, junk — is refused
+// with 416 instead of being handed to R2, which would ignore it and return the whole
+// object, dodging both the chunk cap and the speed limiter. start may be large; when
+// it (or the end) is not a finite number the range is refused rather than mis-computed.
+function videoRange(header) {
+  const m = /^bytes=(\d+)-(\d*)$/.exec(String(header).trim());
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = m[2] === '' ? Infinity : Number(m[2]);
+  if (!Number.isFinite(start) || Number.isNaN(end) || end < start) return null;
+  return { offset: start, length: Math.min(end - start + 1, CHUNK) };
+}
 function reserve(env, u, bytes) {
   if (u.is_admin) return 0;
   const rate = Number(env.MAX_MBPS || 12) * 125000; // bytes per second
@@ -389,13 +402,10 @@ async function serve(req, env, key, u) {
   const isVideo = VIDEO_FILE.test(key);
   let range = req.headers;
   if (isVideo) {
-    const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.get('range') || '');
     if (!req.headers.has('range')) return json({ error: 'Not allowed' }, 403);
-    if (m) {
-      const start = Number(m[1]);
-      const end = m[2] === '' ? Infinity : Number(m[2]);
-      range = { offset: start, length: Math.min(end - start + 1, CHUNK) };
-    }
+    const spec = videoRange(req.headers.get('range'));
+    if (!spec) return json({ error: 'Range not satisfiable' }, 416);
+    range = spec;
   }
   const obj = await env.RESOURCES.get(key, { range });
   if (!obj) return json({ error: 'File not found' }, 404);
@@ -570,6 +580,10 @@ const handle = async (req, env) => {
         if (lesson.length > 500 || !/\.pdf$/i.test(lesson)) return json({ error: 'Bad lesson' }, 400);
         const mineN = await myCourses(env, u);
         if (mineN && !mineN.has(courseOf(lesson))) return json({ error: 'Not allowed' }, 403);
+        // Notes are only meaningful for a PDF that exists: a lesson in the bucket, or an
+        // admin-uploaded resource. This keeps a student from inventing names to fill D1.
+        const realFile = await env.DB.prepare('SELECT 1 x FROM resources WHERE file_key = ?').bind(lesson).first();
+        if (!realFile && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
         if (m === 'GET') {
           const r = await env.DB.prepare('SELECT data FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).first();
           return json({ data: r ? JSON.parse(r.data) : [] });
@@ -578,7 +592,10 @@ const handle = async (req, env) => {
           const { data } = await req.json();
           if (!Array.isArray(data)) return json({ error: 'Bad notes' }, 400);
           const text = JSON.stringify(data);
-          if (text.length > 1500000) return json({ error: 'Your notes on this PDF are too large to save' }, 413);
+          // Measure bytes, not characters: D1 stores UTF-8 bytes, so a short multi-byte
+          // string (e.g. Bengali, 3 bytes per character) could otherwise be saved past
+          // the limit and then fail at the storage layer.
+          if (enc.encode(text).length > 1500000) return json({ error: 'Your notes on this PDF are too large to save' }, 413);
           if (!data.length) await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
           else await env.DB.prepare('INSERT INTO pdf_notes (user_id, lesson, data, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, lesson) DO UPDATE SET data = excluded.data, updated = excluded.updated').bind(u.id, lesson, text, Date.now()).run();
           return json({ ok: true });
