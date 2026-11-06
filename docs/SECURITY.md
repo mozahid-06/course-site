@@ -91,7 +91,7 @@ If either finds a value: **rotate the R2 API token and `SESSION_SECRET`**, and c
 1. Put Cloudflare Access in front of `/api/admin/*` and enable 2-step verification on the Owner's Google account (see the checklist).
 2. Serve video as HLS only and remove MP4s from the bucket, then watch the free-plan request budget (see "Free-plan capacity").
 3. Per-user burned-in watermarking, or a DRM/video service, if leaks become a real problem.
-4. Add end-to-end Worker tests (login throttle, media gate, admin permissions) against a D1 test harness — the current suite only covers pure helpers.
+4. Extend the Worker tests. The suite already covers the security routes — login throttling and enumeration, the media browser gate and range-only rule, the per-hour limit, progress access, per-lesson YouTube ids and sign-out-everywhere — by driving the real entry point against an in-memory D1 (`node:sqlite`) and a fake R2 (`worker/security.test.mjs`). Admin-permission routes are the next addition.
 
 ## Environment options
 | Name | Purpose |

@@ -183,6 +183,9 @@ npm start                          # terminal 2: Angular on :4200, proxies /api 
 Seed local R2 for testing:
 `npx wrangler r2 object put "<bucket-name>/Demo/Notes.pdf" --file ./Notes.pdf --local`
 
+Run the tests:
+`npm test` — pure helpers plus route-level security tests that drive the real Worker against an in-memory D1 (`node:sqlite`) and a fake R2.
+
 ## Look and feel
 
 - Light and dark are switchable from the header menu and remembered per browser (`localStorage['theme']`); with no choice stored, the first paint follows the system setting.
