@@ -146,6 +146,7 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `POST /api/admin/files/order` | admin | `{path, position:1..9999|null}`; puts the entry at that place in its folder and renumbers the folder 1..N. `null`/blank clears just that entry (default order). `404` if the item no longer exists. |
 | `POST /api/admin/files/folder` | admin | `{path}`; creates `<path>/.keep`; `409` if the folder exists |
 | `POST /api/admin/files/description` | admin | `{course, description}`; upserts the owner-written course description in `course_meta` (plain text, trimmed, `\r\n`→`\n`, capped at 2000 chars; empty clears it); `400` when `course` is empty or contains `/`; `invalidateCourse()` on write |
+| `GET /api/admin/files/description?course=` | admin | `{course, description}`; reads the stored description for one course, including a course that has no lesson yet (so the file-manager editor can prefill it) |
 | `POST /api/admin/files/move` | admin | `{from, to, kind:'file'|'folder'}`; copies, rewrites the D1 rows, then deletes the originals; `409` on an existing target, `400` on a lesson becoming a non-lesson or a folder moving inside itself |
 | `POST /api/admin/files/delete` | admin | `{path, kind}`; deletes objects first, then the D1 rows; a course delete also removes enrollments and the `course_meta` row |
 | `POST /api/admin/files/upload/start` | admin | `{key, size, overwrite?}` → `{uploadId}`; `409` if the key exists and `overwrite` is false |
