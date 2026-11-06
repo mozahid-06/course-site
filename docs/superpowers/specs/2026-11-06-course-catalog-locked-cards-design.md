@@ -153,9 +153,12 @@ conditional:
 ### 5. Search and the folder browser
 
 Search and the browser read `api.courses()`; a locked course arrives with no
-sections, so none of its lessons can be found or opened. The browser can only open
-courses through `openCourse`/the guarded request path, so a locked course never
-renders an empty folder.
+sections, so none of its lessons can be found or opened. The header search also
+lists matching **course titles** (`courseHits` in `app.ts`), so those are filtered
+to exclude locked courses — a result you can click should open — and the search-jump
+handler guards `locked` as well. The browser can only open a course through
+`openCourse`/the guarded request path, so a locked course never renders an empty
+folder.
 
 ## Approaches considered
 
@@ -184,6 +187,8 @@ renders an empty folder.
    granted.**
 6. **No change to the enrollment model** — granting a course in Admin → Users is
    still the only way to unlock it, and it takes effect on the next `/api/course`.
+7. **Locked courses are not offered by the header search.** The catalog shows them;
+   the search dropdown does not, so no result is a dead click.
 
 ## Rollout
 
