@@ -35,6 +35,14 @@ export class Api {
   private configReq?: Promise<{ googleClientId: string }>;
   private googleCfg?: { googleClientId: string };
 
+  /** Drop the local session after the server rejects it (another device signed in). */
+  private signOutLocal(): void {
+    if (this.me() === null) return;
+    this.me.set(null);
+    this.courses.set([]);
+    this.order.set({});
+  }
+
   private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
     const res = await fetch('/api/' + path, body === undefined && !method ? {} : {
       method: method ?? 'POST',
@@ -42,6 +50,7 @@ export class Api {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401) this.signOutLocal();
     if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
     return data as T;
   }
@@ -49,6 +58,7 @@ export class Api {
   private async raw<T>(path: string, init: RequestInit): Promise<T> {
     const res = await fetch('/api/' + path, init);
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401) this.signOutLocal();
     if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
     return data as T;
   }
@@ -65,6 +75,12 @@ export class Api {
     } catch {
       this.me.set(null);
     }
+  }
+
+  /** Re-check the session; a 401 signs the client out through req(). */
+  async refreshMe(): Promise<void> {
+    if (this.me() == null) return;
+    try { this.me.set(await this.req<Me>('me')); } catch { /* 401 already handled; a network error keeps the session */ }
   }
 
   async login(email: string, password: string): Promise<void> {

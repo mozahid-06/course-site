@@ -169,11 +169,20 @@ export class App {
     // Scroll events don't bubble, so listen in the capture phase to see every scrollable
     // section. Only containers marked data-scroll-top (plus the page itself) count.
     document.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
+    // A session displaced by another device is only discovered by asking the server;
+    // re-check when this device comes back to the foreground, so an idle tab notices.
+    window.addEventListener('focus', this.onFocus);
+    document.addEventListener('visibilitychange', this.onVisible);
     inject(DestroyRef).onDestroy(() => {
       document.removeEventListener('scroll', this.onScroll, { capture: true });
+      window.removeEventListener('focus', this.onFocus);
+      document.removeEventListener('visibilitychange', this.onVisible);
       clearTimeout(this.resetTimer);
     });
   }
+
+  private readonly onFocus = (): void => { void this.api.refreshMe(); };
+  private readonly onVisible = (): void => { if (document.visibilityState === 'visible') void this.api.refreshMe(); };
 
   private readonly onScroll = (e: Event): void => {
     if (this.resetting) return;
