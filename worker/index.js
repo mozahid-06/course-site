@@ -467,24 +467,33 @@ const handle = async (req, env) => {
       if (path === '/api/course') {
         const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
         const mine = await myCourses(env, u);
-        return json((await listCourse(env)).filter((c) => !mine || mine.has(c.title)).map((c) => ({
-          title: c.title,
-          description: c.description || '',
-          sections: c.sections.map((s) => ({
-            title: s.title,
-            lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
-          })),
-        })));
+        // A catalog: every course is listed. An ungranted one is `locked` and its
+        // sections are withheld here, so a locked course can never leak its lessons.
+        return json((await listCourse(env)).map((c) => {
+          const locked = !!mine && !mine.has(c.title);
+          return {
+            title: c.title,
+            description: c.description || '',
+            locked,
+            sections: locked ? [] : c.sections.map((s) => ({
+              title: s.title,
+              lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
+            })),
+          };
+        }));
       }
-      // Position numbers the student browser shows: path -> number. Only courses this
-      // student can see are included, so it leaks nothing about other courses.
+      // Position numbers the student browser shows: path -> number. A course-level row
+      // is public (so the catalog sorts the same for everyone); a lesson-level row is
+      // only included when the student is granted that course, so a locked course's
+      // folder/lesson paths never leak.
       if (path === '/api/order') {
         const mine = await myCourses(env, u);
         const rows = (await env.DB.prepare('SELECT path, position FROM content_order').all()).results || [];
         const order = {};
         for (const row of rows) {
           const key = String(row.path);
-          if (!mine || mine.has(key.split('/')[0])) order[key] = Number(row.position);
+          const courseLevel = !key.includes('/');
+          if (!mine || mine.has(key.split('/')[0]) || courseLevel) order[key] = Number(row.position);
         }
         return json(order);
       }
