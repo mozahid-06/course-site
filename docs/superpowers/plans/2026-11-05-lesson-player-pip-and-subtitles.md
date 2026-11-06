@@ -247,10 +247,10 @@ mkdir -p /tmp/opencode/subs-seed
 printf 'WEBVTT\n\n00:00.000 --> 00:05.000\nHello\n' > /tmp/opencode/subs-seed/index.en.vtt
 printf '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n' > /tmp/opencode/subs-seed/index.m3u8
 cd /home/taxin/Work/course-site
-npx wrangler r2 object put "course-sourse/TestPlayerPip/Week 1/Lesson 1/index.m3u8" --file /tmp/opencode/subs-seed/index.m3u8 --local
-npx wrangler r2 object put "course-sourse/TestPlayerPip/Week 1/Lesson 1/index.en.vtt" --file /tmp/opencode/subs-seed/index.en.vtt --local
-npx wrangler r2 object put "course-sourse/TestPlayerPip/Week 1/Orphan/index.en.vtt" --file /tmp/opencode/subs-seed/index.en.vtt --local
-npx wrangler r2 object put "course-sourse/TestPlayerPip/Week 1/Other/index.m3u8" --file /tmp/opencode/subs-seed/index.m3u8 --local
+npx wrangler r2 object put "<bucket-name>/TestPlayerPip/Week 1/Lesson 1/index.m3u8" --file /tmp/opencode/subs-seed/index.m3u8 --local
+npx wrangler r2 object put "<bucket-name>/TestPlayerPip/Week 1/Lesson 1/index.en.vtt" --file /tmp/opencode/subs-seed/index.en.vtt --local
+npx wrangler r2 object put "<bucket-name>/TestPlayerPip/Week 1/Orphan/index.en.vtt" --file /tmp/opencode/subs-seed/index.en.vtt --local
+npx wrangler r2 object put "<bucket-name>/TestPlayerPip/Week 1/Other/index.m3u8" --file /tmp/opencode/subs-seed/index.m3u8 --local
 ```
 Restart `npx wrangler dev --port 8787` so the 60-second `listCourse` cache is empty.
 
@@ -402,7 +402,7 @@ Expected: gzip bytes **identical** to the number recorded in Task 1 Step 3 (`mai
 ```bash
 cd /home/taxin/Work/course-site
 for f in /tmp/opencode/subtest/hls/TestPlayerPip/'Week 1'/'Lesson 1'/*; do
-  npx wrangler r2 object put "course-sourse/TestPlayerPip/Week 1/Lesson 1/$(basename "$f")" --file "$f" --local
+  npx wrangler r2 object put "<bucket-name>/TestPlayerPip/Week 1/Lesson 1/$(basename "$f")" --file "$f" --local
 done
 ```
 Restart `wrangler dev` (the build from Step 4 is already in `dist/web/browser`), reload the app at `http://localhost:8787`, open `TestPlayerPip` → `Week 1` → `Lesson 1`.
@@ -422,7 +422,7 @@ Expected, in order:
 ```bash
 printf 'WEBVTT\n\n00:00.000 --> 00:01.500\nHallo\n' > /tmp/opencode/und.vtt
 cd /home/taxin/Work/course-site
-npx wrangler r2 object put "course-sourse/TestPlayerPip/Week 1/Lesson 1/index.und.vtt" --file /tmp/opencode/und.vtt --local
+npx wrangler r2 object put "<bucket-name>/TestPlayerPip/Week 1/Lesson 1/index.und.vtt" --file /tmp/opencode/und.vtt --local
 ```
 
 Expected: the captions menu lists a third entry reading `Undetermined` (or `UND` if `Intl.DisplayNames` does not translate it) and it remains selectable — never blank or `undefined` (Review Focus 2). The existing `eng` fixture already proves a three-letter tag (`eng`) renders as `English`.
@@ -498,4 +498,4 @@ Expected: push succeeds; the Cloudflare deploy starts.
 
 - [ ] **Step 6: Post-deploy smoke check**
 
-After the deploy finishes, open `https://course-site.taxin.workers.dev`, load one self-hosted lesson, confirm the PiP button enters PiP, and confirm the console shows no errors. If the deployed course has no `.vtt` yet, record that as expected (the encoder must be re-run on the sources).
+After the deploy finishes, open `https://<your-site>.workers.dev`, load one self-hosted lesson, confirm the PiP button enters PiP, and confirm the console shows no errors. If the deployed course has no `.vtt` yet, record that as expected (the encoder must be re-run on the sources).

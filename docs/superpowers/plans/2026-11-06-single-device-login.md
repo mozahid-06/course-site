@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- Live base URL `https://course-site.cspg.workers.dev`. Every Worker task is verified against the deployed site, so `npm run deploy` before running that task's live test.
+- Live base URL `https://<your-site>.workers.dev`. Every Worker task is verified against the deployed site, so `npm run deploy` before running that task's live test.
 - Throwaway test admin `uitest-tmp@example.com` / `UiTest-Pass-123!` — recreate with `/tmp/opencode/mk-test-admin.sh`. Throwaway test student `uitest-student@example.com` / `UiTest-Pass-123!`, `is_admin = 0`, granted no courses; create it through `POST /api/admin/users` as the test admin.
-- **Never sign in as or modify the real owner `mbthunter007@gmail.com`.**
+- **Never sign in as or modify the real owner `you@example.com`.**
 - Delete every throwaway user (`uitest-*`) and the `legacy-student-cookie.txt` file before the work is finished.
 - `/tmp/opencode` is wiped when the environment restarts and the repo has **no test runner**: verification lives there as throwaway harnesses. `/tmp/opencode/cdp.mjs` exports `BASE` and `connect(cookie)`, spawns a headless Chromium (reads `CDP_PORT` and `CDP_PROFILE` from the environment), and returns `{ send, evalJs, goto, waitFor, shot, close }`.
 - No new dependencies. Angular templates plus the single global `src/styles.css`; no per-component styles.
@@ -47,7 +47,7 @@
 First make sure the throwaway users exist and capture a **sid-less** cookie (this is the deploy sign-out evidence):
 
 ```bash
-BASE=https://course-site.cspg.workers.dev
+BASE=https://<your-site>.workers.dev
 bash /tmp/opencode/mk-test-admin.sh
 ADMIN=$(curl -s -i -X POST "$BASE/api/login" -H 'content-type: application/json' \
   -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' \
@@ -64,7 +64,7 @@ Create `/tmp/opencode/test-single-session.sh`:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-BASE=https://course-site.cspg.workers.dev
+BASE=https://<your-site>.workers.dev
 login() { # $1 = email -> cookie
   curl -s -i -X POST "$BASE/api/login" -H 'content-type: application/json' \
     -d "{\"email\":\"$1\",\"password\":\"UiTest-Pass-123!\"}" \
@@ -184,7 +184,7 @@ Create `/tmp/opencode/check-single-device.mjs`:
 ```js
 import { connect } from './cdp.mjs';
 
-const BASE = 'https://course-site.cspg.workers.dev';
+const BASE = 'https://<your-site>.workers.dev';
 const login = async () => {
   const r = await fetch(BASE + '/api/login', {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -356,5 +356,5 @@ npx wrangler d1 execute course-db --remote --command "DELETE FROM users WHERE em
 rm -f /tmp/opencode/legacy-student-cookie.txt
 ```
 
-- Confirm the real owner `mbthunter007@gmail.com` is untouched and still an admin.
+- Confirm the real owner `you@example.com` is untouched and still an admin.
 - Confirm the working tree is clean and every commit from Tasks 1–3 is pushed to `main`.

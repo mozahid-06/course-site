@@ -18,7 +18,7 @@
 - **Descriptions are for courses only** — top-level folders (a path with no `/`), not sub-folders.
 - **Card grid:** `repeat(auto-fill, minmax(460px, 1fr))` → 2-up on desktop, 1-up on phones; card `min-height:186px` at `1.25rem 1.4rem`; title on a single line, truncated with an ellipsis (`flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`), description clamped to 3 lines; course intro shown only at the course root (`path.length === 0`); whole card is the `<button>`. Sizes locked in from the approved static preview.
 - **Do not touch** upload endpoints, Video.js internals, the watermark, or the Google sign-in flow (`renderButton` / callback / `loginGoogle`). The PDF.js toolbar is untouched.
-- Direct commits and pushes to `main` are authorized. **Never sign out or modify the real owner account** (`mbthunter007@gmail.com`); use the throwaway test admin.
+- Direct commits and pushes to `main` are authorized. **Never sign out or modify the real owner account** (`you@example.com`); use the throwaway test admin.
 - Follow the existing file-manager patterns: `.files-tool` buttons, the `.adm-dialog` / `.field` markup, `toast()`, `load()`, `ChangeDetectionStrategy.Eager`.
 
 ## Review Focus
@@ -55,10 +55,10 @@ Create the throwaway test admin and a cookie (never the real owner):
 cd /home/taxin/Work/course-site
 PASS=$(node -e 'const e=new TextEncoder();const b=x=>Buffer.from(x).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");(async()=>{const pw="UiTest-Pass-123!";const salt=crypto.getRandomValues(new Uint8Array(16));const k=await crypto.subtle.importKey("raw",e.encode(pw),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations:100000},k,256);console.log(b(salt)+"."+b(bits));})();')
 npx wrangler d1 execute course-db --remote --command "DELETE FROM users WHERE email='uitest-tmp@example.com'; INSERT INTO users (email, pass, is_admin) VALUES ('uitest-tmp@example.com', '$PASS', 1)"
-COOKIE=$(curl -s -i -X POST https://course-site.cspg.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
+COOKIE=$(curl -s -i -X POST https://<your-site>.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
 echo "cookie=${COOKIE:0:12}..."
-curl -s https://course-site.cspg.workers.dev/api/course -H "cookie: s=$COOKIE" | grep -c '"description"'   # expect 0
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/description -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{}'   # expect a Not found error
+curl -s https://<your-site>.workers.dev/api/course -H "cookie: s=$COOKIE" | grep -c '"description"'   # expect 0
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/description -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{}'   # expect a Not found error
 ```
 
 Expected now: `0`, and an error (`{"error":"Not found"}` / 404). Store `$COOKIE` for Step 4.
@@ -175,31 +175,31 @@ cd /home/taxin/Work/course-site
 npm run deploy
 ```
 
-Expected: `Done. https://course-site.cspg.workers.dev`.
+Expected: `Done. https://<your-site>.workers.dev`.
 
 - [ ] **Step 8: Green — exercise the whole lifecycle with a throwaway course**
 
 ```bash
 cd /home/taxin/Work/course-site
-COOKIE=$(curl -s -i -X POST https://course-site.cspg.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
+COOKIE=$(curl -s -i -X POST https://<your-site>.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
 C='zz-desc-test'
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}"; echo
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/youtube -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"folder\":\"\",\"lesson\":\"Intro\",\"link\":\"https://youtu.be/dQw4w9WgXcQ\"}"; echo
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}"; echo
+curl -s -X POST https://<your-site>.workers.dev/api/admin/youtube -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"folder\":\"\",\"lesson\":\"Intro\",\"link\":\"https://youtu.be/dQw4w9WgXcQ\"}"; echo
 # Review Focus 3: an empty folder is not a course.
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{"path":"zz-empty-test"}' >/dev/null
-curl -s https://course-site.cspg.workers.dev/api/course -H "cookie: s=$COOKIE" | grep -c 'zz-empty-test'            # expect 0
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{"path":"zz-empty-test"}' >/dev/null
+curl -s https://<your-site>.workers.dev/api/course -H "cookie: s=$COOKIE" | grep -c 'zz-empty-test'            # expect 0
 # write + read
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/description -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"description\":\"Line one\\nLine two & <b>x</b>\"}"; echo
-curl -s https://course-site.cspg.workers.dev/api/course -H "cookie: s=$COOKIE" | grep -o 'zz-desc-test[^}]*' | head -c 200; echo
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/description -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"description\":\"Line one\\nLine two & <b>x</b>\"}"; echo
+curl -s https://<your-site>.workers.dev/api/course -H "cookie: s=$COOKIE" | grep -o 'zz-desc-test[^}]*' | head -c 200; echo
 # Review Focus 2: the 2000-char cap.
 LONG=$(node -e 'process.stdout.write("x".repeat(2100))')
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/description -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"description\":\"$LONG\"}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log("stored length:", JSON.parse(s).description.length))'
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/description -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"description\":\"$LONG\"}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log("stored length:", JSON.parse(s).description.length))'
 # Review Focus 4: rename carries the description.
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/move -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"from\":\"$C\",\"to\":\"zz-desc-test-2\",\"kind\":\"folder\"}"; echo
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/move -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"from\":\"$C\",\"to\":\"zz-desc-test-2\",\"kind\":\"folder\"}"; echo
 npx wrangler d1 execute course-db --remote --command "SELECT course, length(description) AS n FROM course_meta WHERE course LIKE 'zz-desc-test%'"
 # Review Focus 5: delete removes the row.
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{"path":"zz-desc-test-2"}'; echo
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{"path":"zz-empty-test"}' >/dev/null
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{"path":"zz-desc-test-2"}'; echo
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d '{"path":"zz-empty-test"}' >/dev/null
 npx wrangler d1 execute course-db --remote --command "SELECT COUNT(*) AS left_rows FROM course_meta WHERE course LIKE 'zz-%'"
 ```
 
@@ -353,7 +353,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export const BASE = 'https://course-site.cspg.workers.dev';
+export const BASE = 'https://<your-site>.workers.dev';
 export const SHOTS = '/tmp/opencode/shots';
 
 export async function connect(cookie = '') {
@@ -373,7 +373,7 @@ export async function connect(cookie = '') {
   const waitFor = async (expr, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await evalJs(`!!(${expr})`)) return true; await sleep(150); } return false; };
   const shot = async (name) => { const r = await send('Page.captureScreenshot', { format: 'png' }); writeFileSync(`${SHOTS}/${name}.png`, Buffer.from(r.data, 'base64')); };
   await send('Page.enable'); await send('Runtime.enable'); await send('Network.enable');
-  if (cookie) await send('Network.setCookie', { name: 's', value: cookie, domain: 'course-site.cspg.workers.dev', path: '/', httpOnly: true, secure: true });
+  if (cookie) await send('Network.setCookie', { name: 's', value: cookie, domain: '<your-site>.workers.dev', path: '/', httpOnly: true, secure: true });
   return { send, evalJs, goto, waitFor, shot, close: () => { ws.close(); chrome.kill('SIGKILL'); } };
 }
 ```
@@ -409,14 +409,14 @@ b.close();
 
 ```bash
 cd /home/taxin/Work/course-site
-COOKIE=$(curl -s -i -X POST https://course-site.cspg.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
+COOKIE=$(curl -s -i -X POST https://<your-site>.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
 C='zz-cards-test'; DESC=$'First line\nSecond line <b>not bold</b> & "quoted"'
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/youtube -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"folder\":\"\",\"lesson\":\"Intro\",\"link\":\"https://youtu.be/dQw4w9WgXcQ\"}" >/dev/null
-node -e 'const d=process.argv[1];const c=process.argv[2];fetch("https://course-site.cspg.workers.dev/api/admin/files/description",{method:"POST",headers:{"content-type":"application/json",cookie:"s="+process.env.CS_COOKIE},body:JSON.stringify({course:c,description:d})}).then(r=>r.json()).then(r=>console.log("set:",r.ok))' "$DESC" "$C"
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
+curl -s -X POST https://<your-site>.workers.dev/api/admin/youtube -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"folder\":\"\",\"lesson\":\"Intro\",\"link\":\"https://youtu.be/dQw4w9WgXcQ\"}" >/dev/null
+node -e 'const d=process.argv[1];const c=process.argv[2];fetch("https://<your-site>.workers.dev/api/admin/files/description",{method:"POST",headers:{"content-type":"application/json",cookie:"s="+process.env.CS_COOKIE},body:JSON.stringify({course:c,description:d})}).then(r=>r.json()).then(r=>console.log("set:",r.ok))' "$DESC" "$C"
 pkill -f "remote-deb""ugging-port=9333" 2>/dev/null; rm -rf /tmp/opencode/chrome-profile
 CS_COOKIE="$COOKIE" CS_COURSE="$C" CS_DESC="$DESC" node /tmp/opencode/check-cards.mjs
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
 echo "cleaned"
 ```
 
@@ -596,13 +596,13 @@ Run it:
 
 ```bash
 cd /home/taxin/Work/course-site
-COOKIE=$(curl -s -i -X POST https://course-site.cspg.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
+COOKIE=$(curl -s -i -X POST https://<your-site>.workers.dev/api/login -H 'content-type: application/json' -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
 C='zz-editor-test'
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/youtube -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"folder\":\"\",\"lesson\":\"Intro\",\"link\":\"https://youtu.be/dQw4w9WgXcQ\"}" >/dev/null
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/folder -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
+curl -s -X POST https://<your-site>.workers.dev/api/admin/youtube -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"course\":\"$C\",\"folder\":\"\",\"lesson\":\"Intro\",\"link\":\"https://youtu.be/dQw4w9WgXcQ\"}" >/dev/null
 pkill -f "remote-deb""ugging-port=9333" 2>/dev/null; rm -rf /tmp/opencode/chrome-profile
 CS_COOKIE="$COOKIE" CS_COURSE="$C" node /tmp/opencode/check-editor.mjs
-curl -s -X POST https://course-site.cspg.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
+curl -s -X POST https://<your-site>.workers.dev/api/admin/files/delete -H "cookie: s=$COOKIE" -H 'content-type: application/json' -d "{\"path\":\"$C\"}" >/dev/null
 echo "cleaned"
 ```
 

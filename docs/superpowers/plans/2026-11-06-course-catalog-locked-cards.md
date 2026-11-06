@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- Live base URL `https://course-site.cspg.workers.dev`. Every Worker task is verified against the deployed site, so deploy with `npm run deploy` (it builds first) before running that task's live test.
+- Live base URL `https://<your-site>.workers.dev`. Every Worker task is verified against the deployed site, so deploy with `npm run deploy` (it builds first) before running that task's live test.
 - Throwaway test admin `uitest-tmp@example.com` / `UiTest-Pass-123!` — recreate with `/tmp/opencode/mk-test-admin.sh` (it deletes and re-inserts that row). Throwaway test student `uitest-student@example.com` / `UiTest-Pass-123!`, `is_admin = 0`, granted no courses; create it through `POST /api/admin/users` as the test admin.
-- Never sign in as or modify the real owner `mbthunter007@gmail.com`.
+- Never sign in as or modify the real owner `you@example.com`.
 - Delete every throwaway user (`uitest-*`) and every `zz-*` course/lesson you create, before the work is finished.
 - `/tmp/opencode` is wiped when the environment restarts, and the repo has no test runner: verification scripts live there as throwaway harnesses. `/tmp/opencode/cdp.mjs` exports `BASE` and `connect(cookie)`, driving a headless Chromium (screenshots to `/tmp/opencode/shots/`).
 - No new dependencies. Angular templates plus the single global `src/styles.css`; no per-component styles.
@@ -47,7 +47,7 @@ Create `/tmp/opencode/test-empty-course.sh`:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-BASE=https://course-site.cspg.workers.dev
+BASE=https://<your-site>.workers.dev
 COOKIE=$(curl -s -i -X POST "$BASE/api/login" -H 'content-type: application/json' \
   -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' \
   | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
@@ -120,7 +120,7 @@ Create `/tmp/opencode/test-catalog-lock.sh`:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-BASE=https://course-site.cspg.workers.dev
+BASE=https://<your-site>.workers.dev
 ADMIN=$(curl -s -i -X POST "$BASE/api/login" -H 'content-type: application/json' \
   -d '{"email":"uitest-tmp@example.com","password":"UiTest-Pass-123!"}' \
   | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p')
@@ -255,7 +255,7 @@ const read = `(() => {
   });
 })()`;
 
-await b.goto('https://course-site.cspg.workers.dev/');
+await b.goto('https://<your-site>.workers.dev/');
 if (!await b.waitFor(`document.querySelector('.course-card')`, 15000)) throw new Error('no cards');
 let m = JSON.parse(await b.evalJs(read));
 console.log('locked', JSON.stringify(m));
@@ -292,7 +292,7 @@ Run it with the student cookie (Task 2 must be deployed first):
 
 ```bash
 CS_COURSE=zz-catalog-empty \
-CS_STUDENT=$(curl -s -i -X POST https://course-site.cspg.workers.dev/api/login -H 'content-type: application/json' \
+CS_STUDENT=$(curl -s -i -X POST https://<your-site>.workers.dev/api/login -H 'content-type: application/json' \
   -d '{"email":"uitest-student@example.com","password":"UiTest-Pass-123!"}' \
   | sed -n 's/^[Ss]et-[Cc]ookie: s=\([^;]*\).*/\1/p') \
 node /tmp/opencode/check-locked-card.mjs
@@ -394,4 +394,4 @@ curl -s -X POST "$BASE/api/admin/files/delete" -H "cookie: s=$ADMIN" -H 'content
 # delete the test student and the test admin rows from D1
 npx wrangler d1 execute course-db --remote --command "DELETE FROM users WHERE email IN ('uitest-student@example.com','uitest-tmp@example.com')"
 ```
-- Confirm the real owner `mbthunter007@gmail.com` is untouched and the real course still lists.
+- Confirm the real owner `you@example.com` is untouched and the real course still lists.

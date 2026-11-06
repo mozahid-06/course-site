@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - Admin-only. Every new route lives under `/api/admin/` and is reached after the existing `if (!u.is_admin) return json({ error: 'Admins only' }, 403)` guard in `worker/index.js`.
-- R2 binding is renamed `VIDEOS` → `RESOURCES` (owner's request). Bucket name stays `course-sourse`.
+- R2 binding is renamed `VIDEOS` → `RESOURCES` (owner's request). Bucket name stays `<bucket-name>`.
 - Secrets are never committed: real values only in `.dev.vars` (gitignored); `.dev.vars.example` gets placeholders.
-- New env vars: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` (optional, default `course-sourse`).
+- New env vars: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` (optional, default `<bucket-name>`).
 - Object keys: at least one `/`, ≤ 500 characters, no `..`, no leading `/`, no backslashes, no control characters.
 - A lesson key is a `.pdf`, or a video extension (`.mp4|.webm|.mkv|.mov|.avi|.m4v|.m3u8`) that is not a `.ts` segment. Only lesson keys carry student data.
 - Multipart: parts ≥ 5 MiB except the last, ≤ 10,000 parts, 8 MiB default and scaled up so 10,000 is never exceeded. Files ≤ 16 MiB use a single presigned PUT.
@@ -57,7 +57,7 @@ In `wrangler.toml`, `binding = "VIDEOS"` → `binding = "RESOURCES"`. In `worker
 export function invalidateCourse() { cache = { at: 0, data: null }; }
 ```
 
-- [ ] **Step 3: Add the secrets.** Put the four values in `.dev.vars` (real R2 token values, plus `R2_ACCOUNT_ID=2ee4cb2f8d4de267cc9e18ae77430723`). Add the same four keys to `.dev.vars.example` with placeholder text and a comment pointing at the bucket CORS requirement.
+- [ ] **Step 3: Add the secrets.** Put the four values in `.dev.vars` (real R2 token values, plus `R2_ACCOUNT_ID=<ACCOUNT_ID>`). Add the same four keys to `.dev.vars.example` with placeholder text and a comment pointing at the bucket CORS requirement.
 
 - [ ] **Step 4: Verify nothing regressed.** Re-run `python3 /tmp/opencode/verify-discussion.py` → `35 passed, 0 failed`. Then `curl -s -b /tmp/opencode/cj.txt http://127.0.0.1:8787/api/course | head -c 200` returns the course JSON (proves `env.RESOURCES` reads the bucket).
 
@@ -82,9 +82,9 @@ git commit -m "refactor: rename the R2 binding to RESOURCES and add S3 config"
 - [ ] **Step 1: Seed fixtures into the local bucket**
 
 ```bash
-npx wrangler r2 object put "course-sourse/Test Course & Co/Intro #1.mp4" --file /tmp/opencode/dummy.mp4 --local
-npx wrangler r2 object put "course-sourse/Test Course & Co/Section A/notes.pdf" --file /tmp/opencode/audit.pdf --local
-npx wrangler r2 object put "course-sourse/Test Course & Co/Section A/.keep" --file /dev/null --local
+npx wrangler r2 object put "<bucket-name>/Test Course & Co/Intro #1.mp4" --file /tmp/opencode/dummy.mp4 --local
+npx wrangler r2 object put "<bucket-name>/Test Course & Co/Section A/notes.pdf" --file /tmp/opencode/audit.pdf --local
+npx wrangler r2 object put "<bucket-name>/Test Course & Co/Section A/.keep" --file /dev/null --local
 ```
 
 - [ ] **Step 2: Write the failing checks** in `/tmp/opencode/verify-files.py`, reusing the `Client`/`check` harness from `verify-discussion.py`:
@@ -237,7 +237,7 @@ git add worker/files.js && git commit -m "feat: delete files and folders with th
 
 - [ ] **Step 3: Implement the routes.** `start` → `POST ?uploads`; `part` → presign `PUT` with `?partNumber=N&uploadId=...`; `complete` → `POST ?uploadId=...` with the XML body built from the parts (escape ETags); `abort` → `DELETE ?uploadId=...`; `parts` → `GET ?uploadId=...`, parsing `<Part>` entries; `url` → presign a `PUT` for a small file. Guard `size` (1 byte … 500 GB) and reuse `cleanKey`.
 
-- [ ] **Step 4: Prove it against the real bucket.** Make a 6 MiB file, run start → part → PUT the bytes to the presigned URL with `curl --upload-file` → complete, then confirm with `rclone lsf r2:course-sourse --recursive` and delete the object with the admin delete route. This is the only step that touches the live R2 credentials.
+- [ ] **Step 4: Prove it against the real bucket.** Make a 6 MiB file, run start → part → PUT the bytes to the presigned URL with `curl --upload-file` → complete, then confirm with `rclone lsf r2:<bucket-name> --recursive` and delete the object with the admin delete route. This is the only step that touches the live R2 credentials.
 
 - [ ] **Step 5: Run the suite, confirm pass, commit** (`feat: signed multipart upload endpoints`).
 
@@ -296,7 +296,7 @@ git add worker/files.js && git commit -m "feat: delete files and folders with th
 
 - [ ] **Step 2: Wire it into the view** — a file input plus drag-and-drop on the listing area, a per-file progress row with size, percent, and retry/cancel, a "paused — re-select the file" state after a reload, and an explicit "replace it" confirm when a chosen name already exists (uploads refuse to overwrite otherwise).
 
-- [ ] **Step 3: Browser check.** Upload a small file and a 20 MB file; watch progress reach 100%; confirm with `rclone lsf r2:course-sourse --recursive` that both landed; reload mid-upload and confirm only the missing parts are re-sent (network panel). Clean up with the delete route.
+- [ ] **Step 3: Browser check.** Upload a small file and a 20 MB file; watch progress reach 100%; confirm with `rclone lsf r2:<bucket-name> --recursive` that both landed; reload mid-upload and confirm only the missing parts are re-sent (network panel). Clean up with the delete route.
 
 - [ ] **Step 4: Commit** (`feat: drag-and-drop uploads with progress and resume`).
 
@@ -308,9 +308,9 @@ git add worker/files.js && git commit -m "feat: delete files and folders with th
 - Modify: `docs/SECURITY.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: CSP.** Add the R2 endpoint to `connect-src` in the report-only policy: `https://2ee4cb2f8d4de267cc9e18ae77430723.r2.cloudflarestorage.com`.
+- [ ] **Step 1: CSP.** Add the R2 endpoint to `connect-src` in the report-only policy: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
-- [ ] **Step 2: Bucket CORS.** PUT the rule via the Cloudflare API (the wrangler OAuth token works; the R2 `cfat_` token does not): origins `https://course-site.taxin.workers.dev`, `http://localhost:4200`, `http://192.168.0.101:4200`; methods `GET, HEAD, PUT, POST`; headers `content-type`; expose `ETag`; max age 3600. Re-GET it to confirm.
+- [ ] **Step 2: Bucket CORS.** PUT the rule via the Cloudflare API (the wrangler OAuth token works; the R2 `cfat_` token does not): origins `https://<your-site>.workers.dev`, `http://localhost:4200`, `http://192.168.0.101:4200`; methods `GET, HEAD, PUT, POST`; headers `content-type`; expose `ETag`; max age 3600. Re-GET it to confirm.
 
 - [ ] **Step 3: Production secrets.** `npx wrangler secret put` for the four `R2_*` values (stdin, non-interactive).
 

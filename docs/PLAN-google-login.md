@@ -16,7 +16,7 @@ Let students sign in with "Continue with Google" as well as email + password, wi
 ## 1. Google Cloud setup (one time, manual)
 1. console.cloud.google.com: create a project, then APIs & Services, OAuth consent screen (External; app name, support email; publish to Production so non-test users can sign in. Only basic scopes are used, so no review is needed).
 2. Credentials, Create OAuth client ID, type **Web application**.
-3. Authorized JavaScript origins: `https://course-site.taxin.workers.dev`, your custom domain if any, and `http://localhost:4200` for dev. Redirect URIs are not needed for this flow.
+3. Authorized JavaScript origins: `https://<your-site>.workers.dev`, your custom domain if any, and `http://localhost:4200` for dev. Redirect URIs are not needed for this flow.
 4. Copy the **Client ID**. It is public, not a secret.
 5. Cloudflare: add `GOOGLE_CLIENT_ID` as a variable (also in `.dev.vars`, and `.dev.vars.example`).
 
