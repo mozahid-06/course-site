@@ -82,14 +82,14 @@ type View =
                 <app-notes-controls [viewer]="pv" />
               }
 
-              <app-options-menu />
-
               <button class="done-btn" [class.p]="!l.done" [class.is-done]="l.done" [attr.aria-pressed]="l.done"
                 [attr.aria-label]="l.done ? 'Completed' : 'Mark as complete'"
                 [title]="l.done ? 'Completed' : 'Mark as complete'" (click)="toggle(l)">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
                 <span class="lbl">{{ l.done ? 'Completed' : 'Mark as complete' }}</span>
               </button>
+
+              <app-options-menu />
             </div>
             <div class="player-body" data-scroll-top>
               @if (l.kind === 'pdf') {
