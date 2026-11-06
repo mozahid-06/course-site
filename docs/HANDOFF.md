@@ -1,6 +1,6 @@
 # Handoff: how this project was built and where it stands
 
-For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), lazy loading of the PDF viewer and admin panel, the YouTube lessons feature, the file manager (uploads, rename, move, delete, folders, admin-controlled ordering), the admin panel, UI redesign and mobile pass, the picture-in-picture and sidecar-subtitle work on the lesson players, and PDF resources on video lessons.
+For a developer or AI assistant who will review, optimize or extend the project. Read it fully before changing anything. Last updated after the Angular 22 / TypeScript 6 upgrade (see the decision log), lazy loading of the PDF viewer and admin panel, the YouTube lessons feature, the file manager (uploads, rename, move, delete, folders, admin-controlled ordering), the admin panel, UI redesign and mobile pass, the picture-in-picture and sidecar-subtitle work on the lesson players, PDF resources on video lessons, and the course catalog with locked courses.
 
 ## 1. Goal and requirements
 
@@ -122,8 +122,8 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `GET /api/config` | none | `{googleClientId}` |
 | `POST /api/login/google` | none | `{credential}`; verifies the Google ID token (RS256 against Google's JWKS, `iss`, `aud`, `exp`, `email_verified`), matches `google_sub` then invited email, links on first login |
 | `GET /api/me` | session | `{id, email, is_admin}` |
-| `GET /api/course` | session | `[{title, description, sections:[{title, lessons:[{id, title, kind:'video'|'pdf'|'youtube', done}]}]}]`; `description` is the owner-written text from `course_meta` (empty string when unset); `youtube` lessons also carry `yt` (the video id); `section.title` is the sub-path joined by `" / "` or `null`. Built from the bucket listing plus `worker/youtube.js`. Sorted by `content_order` where set. |
-| `GET /api/order` | session | `{path: position}` for every saved number in the courses this user can see (students: enrolled only; admins: all). The student browser uses it for its number labels. |
+| `GET /api/course` | session | A **catalog**: every course is sent to every signed-in user. `[{title, description, locked, sections:[{title, lessons:[{id, title, kind:'video'|'pdf'|'youtube', done}]}]}]`; `locked` is `true` when the viewer is not an admin and the course is not granted, and then `sections` is `[]` so a locked course never leaks its lessons (its title and owner-written description still travel, as they are course-level). `description` is the owner-written text from `course_meta` (empty string when unset); `youtube` lessons also carry `yt` (the video id); `section.title` is the sub-path joined by `" / "` or `null`. Built from the bucket listing plus `worker/youtube.js`. Sorted by `content_order` where set. |
+| `GET /api/order` | session | `{path: position}` for the saved numbers the browser needs: every course-level path (one with no `/`) for all viewers, plus a lesson-level path only when its course is granted (admins: all). A locked course's lesson paths are withheld. The student browser uses it for its number labels. |
 | `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
 | `GET/PUT/DELETE /api/notes/<url-encoded key>` | session | Own notes for one `.pdf`; every query is scoped to the signed-in user; `403` if the course is not enrolled |
@@ -162,13 +162,13 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 
 1. List all R2 keys (paginated, 1000 per call); cached in memory for 60 s per isolate. Every file-manager change calls `invalidateCourse()`, so the site reflects it at once. Single-PUT uploads finish entirely in the browser, so the client calls `/api/admin/files/upload/done` afterwards to drop the same cache.
 2. Keep videos (`mp4 webm mkv mov avi m4v m3u8`) and `.pdf`; skip `.ts` segments, root-level files, and any key with a `_resources` segment (those are lesson resources, not lessons).
-3. Course = first path segment. Section = remaining directories joined by `" / "` (empty = course root).
+3. Course = first path segment. A course is registered for any nested key **before** the lesson filter, so a top-level folder holding only its `.keep` placeholder — a brand-new, empty course — is listed too, as `{ title, description, sections: [] }`. Section = remaining directories joined by `" / "` (empty = course root).
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
 5. Sort by `content_order` where a path has a saved position (numbered items first, in that order), then with a numeric-aware collator; folders sort before files at the same level.
 6. Merge `youtube_lessons` from D1 (managed in Admin → Files; seeded once from `worker/youtube.js`). Each row's `id` is split on `/`; the first segment is the course (created if missing, so a YouTube-only course appears), the middle segments form the section title (joined with `" / "`), and the last segment is the lesson name. `ytId()` accepts a watch/`youtu.be`/`embed`/`shorts`/`live` link or a bare id and is used on write; an unusable link is refused at the endpoint. The merged lesson is `{id, title, kind:'youtube', yt}` where `id` is the full path, so progress/comments/notes/resources/enrollments work unchanged. A row whose id matches a real file is skipped (the file wins).
 7. Attach each course's `description` from `course_meta` (keyed by the top-level folder name; empty string when unset), so `/api/course` and the card grid can show it.
 
-`/api/course` and `/api/media/*` then filter by `enrollments` (`myCourses`; admins get everything). The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` for both the main browser (current level) and the sidebar outline (`rows` computed: open folders only, flat list while searching).
+`/api/course` is a catalog: it sends every course and marks an ungranted one `locked` with `sections: []` (it no longer filters by `enrollments`). Lesson-level access is still enforced by `myCourses` on `/api/media/*`, `/api/notes/*`, comments and resources (admins get everything), so a locked course's lessons stay protected even by direct URL. The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` for both the main browser (current level) and the sidebar outline (`rows` computed: open folders only, flat list while searching); a locked card is `disabled` and its `openCourse`/search-jump paths are guarded.
 
 ### Auth
 
