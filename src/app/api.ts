@@ -168,6 +168,10 @@ export class Api {
   setFilePosition(path: string, position: number | null): Promise<{ ok: true; path: string; position: number | null; order?: Record<string, number> }> {
     return this.req('admin/files/order', { path, position });
   }
+  /** Sets or clears the description shown for a course (its top-level folder name). */
+  saveCourseDescription(course: string, description: string): Promise<{ ok: true; course: string; description: string }> {
+    return this.req('admin/files/description', { course, description });
+  }
 
   uploadStart(key: string, size: number, overwrite = false): Promise<{ uploadId: string; key: string }> {
     return this.req('admin/files/upload/start', { key, size, overwrite });

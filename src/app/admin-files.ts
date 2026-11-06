@@ -23,6 +23,8 @@ interface Ask {
   label: string;
   confirm: string;
   danger: boolean;
+  /** When set, the dialog renders a textarea with this many rows instead of one input. */
+  lines?: number;
   run: (value: string) => Promise<unknown>;
 }
 
@@ -177,6 +179,11 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6h6l2 2h8v12H4z" /><path d="m10 14 4-4 4 4" /><path d="M14 10v6" /></svg>
                 </button>
               } @else if (row.kind === 'folder') {
+                @if (!row.path.includes('/')) {
+                  <button type="button" class="files-tool" title="Description" [attr.aria-label]="'Edit description for ' + row.name" (click)="askDescription(row.path)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16" /><path d="M4 11h16" /><path d="M4 16h10" /></svg>
+                  </button>
+                }
                 <button type="button" class="files-tool" title="Rename" aria-label="Rename folder" (click)="askRename(row.name, row.path, 'folder')">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16z" /><path d="m13 7 4 4" /></svg>
                 </button>
@@ -230,13 +237,22 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
           @if (a.label) {
             <label class="field">
               <span>{{ a.label }}</span>
-              <input
-                [value]="askValue()"
-                (input)="askValue.set($any($event.target).value)"
-                (keydown.enter)="runAsk()"
-                autocomplete="off"
-                spellcheck="false"
-              />
+              @if (a.lines) {
+                <textarea
+                  [rows]="a.lines"
+                  [value]="askValue()"
+                  (input)="askValue.set($any($event.target).value)"
+                  spellcheck="false"
+                ></textarea>
+              } @else {
+                <input
+                  [value]="askValue()"
+                  (input)="askValue.set($any($event.target).value)"
+                  (keydown.enter)="runAsk()"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              }
             </label>
           }
           @if (askError()) { <p class="files-error">{{ askError() }}</p> }
@@ -562,6 +578,20 @@ export class AdminFiles implements OnDestroy {
         await this.api.moveEntry(full, this.join(dest, this.base(full)), kind);
       },
     }, this.path());
+  }
+
+  /** Course descriptions live in D1; the card, the intro and this dialog all read the same value. */
+  protected askDescription(course: string): void {
+    const current = this.api.courses().find((c) => c.title === course)?.description ?? '';
+    this.openAsk({
+      title: `About “${course}”`,
+      hint: 'Shown on the course card and at the top of the course. Leave it empty to remove it.',
+      label: 'Description',
+      lines: 5,
+      confirm: 'Save',
+      danger: false,
+      run: async (value) => { await this.api.saveCourseDescription(course, value); },
+    }, current);
   }
 
   protected askDelete(name: string, full: string, kind: Kind): void {
