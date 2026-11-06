@@ -1,4 +1,6 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal, OnInit } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Api, AdminUser, BulkResult } from './api';
 import { AdminFiles } from './admin-files';
 import { OptionsMenu } from './options-menu';
@@ -430,25 +432,19 @@ const MODES: { key: CourseMode; label: string }[] = [
 })
 export class Admin implements OnInit {
   protected readonly api = inject(Api);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
-  /** Which screen this panel shows. Admin-only either way. */
-  protected readonly view = signal<'users' | 'files'>('users');
+  private readonly queryParams = toSignal(this.route.queryParamMap, { initialValue: this.route.snapshot.queryParamMap });
 
-  constructor() {
-    // Keep the admin sub-view in the hash, so the browser Back button returns to Users.
-    const onHash = () => this.view.set(location.hash === '#files' ? 'files' : 'users');
-    window.addEventListener('hashchange', onHash);
-    inject(DestroyRef).onDestroy(() => window.removeEventListener('hashchange', onHash));
-    if (location.hash === '#files') this.view.set('files');
-  }
+  /** Which screen this panel shows; kept in `?tab=files`, so Back returns to Users. */
+  protected readonly view = computed<'users' | 'files'>(() => (this.queryParams().get('tab') === 'files' ? 'files' : 'users'));
 
   protected showFiles(): void {
-    this.view.set('files');
-    if (location.hash !== '#files') location.hash = 'files';
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { tab: 'files' }, queryParamsHandling: 'merge' });
   }
   protected showUsers(): void {
-    this.view.set('users');
-    if (location.hash) history.pushState(null, '', location.pathname + location.search);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { tab: null }, queryParamsHandling: 'merge' });
   }
 
   protected readonly users = signal<AdminUser[]>([]);

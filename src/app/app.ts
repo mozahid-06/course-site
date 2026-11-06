@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterRenderEffect, computed, inject, signal, viewChild } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
 import { Api, CourseData } from './api';
 import { Login } from './login';
-import { Course } from './course';
-import { Admin } from './admin';
 import { LessonSearch } from './lesson-search';
 import { Shell } from './shell';
 import { OptionsMenu } from './options-menu';
+import { NavButtons } from './nav-buttons';
 
 interface LessonHit {
   id: string;
@@ -19,16 +19,17 @@ interface LessonHit {
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Login, Course, Admin, OptionsMenu],
+  imports: [Login, OptionsMenu, RouterOutlet, NavButtons],
   host: {
     '[class.no-head]': '!shell.headerVisible()',
     '(document:click)': 'onDocClick($event)',
   },
   template: `
-    @if (api.me(); as me) {
+    @if (api.me()) {
       <!-- The header exists only on the course list and folder browser. -->
       @if (shell.headerVisible()) {
         <header [class.searching]="search.expanded()">
+          <app-nav-buttons />
           <h2 class="wordmark">Course</h2>
 
           <div class="head-search">
@@ -100,23 +101,7 @@ interface LessonHit {
         </header>
       }
 
-      @if (shell.admin() && me.is_admin) {
-        @defer (on immediate) {
-          <app-admin />
-        } @placeholder {
-          <div class="defer-fill" aria-live="polite">Loading admin panel...</div>
-        } @error {
-          <div class="defer-fill" role="alert">Could not load the admin panel. Check your connection and try again.</div>
-        }
-      } @else {
-        @defer (on immediate) {
-          <app-course />
-        } @placeholder {
-          <div class="defer-fill" aria-live="polite">Loading your courses...</div>
-        } @error {
-          <div class="defer-fill" role="alert">Could not load your courses. Check your connection and try again.</div>
-        }
-      }
+      <router-outlet />
 
       <!-- Back to top: appears once any long section (or the page) is scrolled down. -->
       @if (showTop()) {

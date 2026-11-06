@@ -63,7 +63,24 @@ export class Api {
     return data as T;
   }
 
-  async init(): Promise<void> {
+  /**
+   * Resolves after the first session check, so the admin route guard can wait for
+   * `me` to be known instead of redirecting while it is still `undefined`.
+   */
+  private readyResolve?: () => void;
+  readonly ready = new Promise<void>((resolve) => { this.readyResolve = resolve; });
+  private initializing?: Promise<void>;
+
+  init(): Promise<void> {
+    // Bootstrap and the admin guard both call this; share the first run. A later
+    // call (right after sign-in) starts a fresh check so the session is re-read.
+    return (this.initializing ??= this.load().finally(() => {
+      this.initializing = undefined;
+      this.readyResolve?.();
+    }));
+  }
+
+  private async load(): Promise<void> {
     // Ask for the public config alongside the session check, so the login form already
     // has the Google client id the moment it mounts and its button can render with the
     // email/password fields instead of a moment later.

@@ -5,6 +5,9 @@ compatibility_date = "2026-10-01"
 [assets]
 directory = "./dist/web/browser"
 run_worker_first = ["/api/*"]
+# Deep links (/course/..., /admin) are handled by the Angular router, so any
+# unknown path must serve the app rather than a 404.
+not_found_handling = "single-page-application"
 
 # No IDs on purpose: Cloudflare creates these on the first deploy
 [[d1_databases]]
