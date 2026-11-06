@@ -1,5 +1,6 @@
 import { handleFiles } from './files.js';
 import { lessonOf, hourBucket, publicLesson } from './limits.js';
+import { sessionKey, scramble } from './yt-cipher.mjs';
 import { YOUTUBE_LESSONS } from './youtube.js';
 
 const enc = new TextEncoder();
@@ -501,7 +502,7 @@ const handle = async (req, env) => {
       const u = await getUser(req, env);
       if (!u) return json({ error: 'Not logged in' }, 401);
 
-      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin });
+      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin, ytKey: await sessionKey(env.SESSION_SECRET, u.id, u.sid) });
       // "Sign out everywhere": bump the session version so every cookie minted before now
       // fails getUser, then clear this device's cookie too. Available to any user (admins
       // included) as the least disruptive alternative to forcing single-device login on admins.
@@ -540,7 +541,7 @@ const handle = async (req, env) => {
         const lesson = course && course.sections.flatMap((s) => s.lessons).find((l) => l.id === key);
         if (!lesson || lesson.kind !== 'youtube' || !lesson.yt) return json({ error: 'Not found' }, 404);
         if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
-        return json({ yt: lesson.yt }, 200, { 'cache-control': 'no-store' });
+        return json({ yt: scramble(await sessionKey(env.SESSION_SECRET, u.id, u.sid), lesson.yt) }, 200, { 'cache-control': 'no-store' });
       }
       // Position numbers the student browser shows: path -> number. A course-level row
       // is public (so the catalog sorts the same for everyone); a lesson-level row is

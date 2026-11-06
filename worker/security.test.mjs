@@ -4,6 +4,9 @@ import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { invalidateCourse } from './index.js';
 import { db, r2, hashPw } from './harness.mjs';
+// The client decoder is the contract for the scrambled payload, so the test decodes the
+// real response with the real client code rather than a copy of the algorithm.
+import { decodeYt } from '../src/app/yt-cipher.ts';
 
 const SECRET = 'S'.repeat(40);
 const OWNER = 'owner@example.com';
@@ -153,7 +156,13 @@ test('YouTube ids are fetched per lesson and never appear in /api/course', async
 
   const yt = await call('/api/lesson/Course/Clip/yt', { headers: { cookie } });
   assert.equal(yt.status, 200);
-  assert.deepEqual(await yt.json(), { yt: 'dQw4w9WgXcQ' });
+  const { ytKey } = await (await call('/api/me', { headers: { cookie } })).json();
+  assert.equal(typeof ytKey, 'string');
+  assert.ok(ytKey.length > 0, 'the session carries an obfuscation key');
+  const body = await yt.json();
+  assert.notEqual(body.yt, 'dQw4w9WgXcQ', 'the id is not the plain value');
+  assert.ok(!String(body.yt).includes('dQw4w9WgXcQ'), 'the plain id does not appear in the payload');
+  assert.equal(decodeYt(ytKey, body.yt), 'dQw4w9WgXcQ', 'the client decodes the real id');
 
   // A student without the course cannot fetch the id...
   const outsider = await addUser();

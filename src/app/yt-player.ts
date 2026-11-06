@@ -4,6 +4,7 @@ import '@videojs/html/video/player';
 import '@videojs/html/video/skin';
 import '@videojs/html/media/youtube-video';
 import { Api } from './api';
+import { decodeYt } from './yt-cipher';
 
 /** A YouTube lesson: a Video.js player with the same moving email watermark as the video player. */
 @Component({
@@ -170,8 +171,10 @@ export class YtPlayer {
     this.blocked.set(false);
     try {
       const { yt } = await this.api.getYt(key);
-      if (key !== this.key() || !yt) return; // a newer lesson opened, or the server sent nothing
-      this.ytId.set(yt);
+      // The id arrives scrambled (XOR with the session key from /api/me); decode it here.
+      const id = decodeYt(this.api.me()?.ytKey ?? '', yt);
+      if (key !== this.key() || !id) return; // a newer lesson opened, or the server sent nothing
+      this.ytId.set(id);
       this.coverTimer = setTimeout(() => {
         if (this.covered()) this.blocked.set(true);
       }, 4000);
