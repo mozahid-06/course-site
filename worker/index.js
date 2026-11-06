@@ -477,8 +477,15 @@ const handle = async (req, env) => {
         const em = String(email || '').trim().toLowerCase();
         const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40]];
         if (await locked(env, keys)) return tooMany();
+        const pass = String(password || '');
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
-        if (!u || !(await checkPw(String(password || ''), u.pass))) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
+        // Spend one PBKDF2 derive even when the email is unknown, and when the account has no
+        // usable password (Google-only sign-in), so the response time does not reveal which
+        // emails exist. The error message stays identical in every case.
+        let ok = false;
+        if (u && u.pass.includes('.')) ok = await checkPw(pass, u.pass);
+        else await derive(pass, crypto.getRandomValues(new Uint8Array(16)));
+        if (!ok) { await noteFail(env, keys); return json({ error: 'Wrong email or password' }, 401); }
         return json({ ok: true }, 200, { 'set-cookie': await startSession(env, u, secure) });
       }
       if (path === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
