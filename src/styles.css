@@ -210,6 +210,7 @@ button.media-cover{cursor:pointer}
 .media-cover:focus-visible{outline:3px solid #93c5fd;outline-offset:-3px}
 .media-cover svg{position:absolute;inset:0;margin:auto;width:clamp(40px,11%,64px);height:auto;color:rgba(255,255,255,.9);filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
 .media-cover .spin{position:absolute;inset:0;margin:auto;width:clamp(30px,9%,44px);aspect-ratio:1;border:3px solid rgba(255,255,255,.22);border-top-color:rgba(255,255,255,.92);border-radius:50%;animation:media-spin .9s linear infinite}
+.media-cover .yt-msg{position:absolute;inset:0;margin:auto;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;font-size:15px;line-height:1.5;color:rgba(255,255,255,.92)}
 @keyframes media-spin{to{transform:rotate(1turn)}}
 @media (prefers-reduced-motion:reduce){.media-cover .spin{animation-duration:2.4s}}
 .vw iframe{display:block;width:100%;aspect-ratio:16/9;border:0;background:#000}

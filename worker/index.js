@@ -500,10 +500,25 @@ const handle = async (req, env) => {
             locked,
             sections: locked ? [] : c.sections.map((s) => ({
               title: s.title,
-              lessons: s.lessons.map((l) => ({ ...l, done: w.has(l.id) })),
+              // publicLesson() drops the YouTube id: ids are fetched one at a time from
+              // /api/lesson/<id>/yt, so the whole-course response cannot be scraped for them.
+              lessons: s.lessons.map((l) => publicLesson(l, w.has(l.id))),
             })),
           };
         }));
+      }
+      // The YouTube id for one lesson, fetched when the lesson opens. Admins and students go
+      // through the same check as media: lessonAccess, then the per-hour lesson limit. Only a
+      // YouTube lesson the user may open answers; anything else is a 404.
+      if (path.startsWith('/api/lesson/') && path.endsWith('/yt')) {
+        const key = decodeURIComponent(path.slice('/api/lesson/'.length, -'/yt'.length));
+        const access = await lessonAccess(env, u, key);
+        if (access !== 'ok') return accessError(access);
+        const course = (await listCourse(env)).find((c) => c.title === courseOf(key));
+        const lesson = course && course.sections.flatMap((s) => s.lessons).find((l) => l.id === key);
+        if (!lesson || lesson.kind !== 'youtube' || !lesson.yt) return json({ error: 'Not found' }, 404);
+        if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
+        return json({ yt: lesson.yt }, 200, { 'cache-control': 'no-store' });
       }
       // Position numbers the student browser shows: path -> number. A course-level row
       // is public (so the catalog sorts the same for everyone); a lesson-level row is

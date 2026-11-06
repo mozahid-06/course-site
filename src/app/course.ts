@@ -109,7 +109,7 @@ type View =
               } @else {
                 @defer (on immediate) {
                   @if (l.kind === 'youtube') {
-                    <app-yt-player [yt]="l.yt || ''" />
+                    <app-yt-player [key]="l.id" />
                   } @else {
                     <app-player [key]="l.id" [subtitles]="l.subtitles ?? []" (ended)="finish(l)" />
                   }

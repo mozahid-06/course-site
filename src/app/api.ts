@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
 export interface Subtitle { key: string; lang: string }
-export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean; yt?: string; subtitles?: Subtitle[] }
+export interface Lesson { id: string; title: string; kind: 'video' | 'pdf' | 'youtube'; done: boolean; subtitles?: Subtitle[] }
 export interface Section { title: string | null; lessons: Lesson[] }
 export interface CourseData { title: string; description: string; locked?: boolean; sections: Section[] }
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
@@ -179,6 +179,14 @@ export class Api {
 
   mediaUrl(key: string): string {
     return '/api/media/' + key.split('/').map(encodeURIComponent).join('/');
+  }
+
+  /**
+   * The YouTube id for one lesson, fetched when that lesson opens. The id is deliberately not
+   * part of the bulk course list, so it cannot be scraped in one request.
+   */
+  getYt(id: string): Promise<{ yt: string }> {
+    return this.req(`lesson/${encodeURIComponent(id)}/yt`);
   }
 
   // ---- Admin file manager ----
