@@ -70,6 +70,7 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
         (annotationEditorLayerRendered)="onEditorLayer($event)"
         (annotationEditorEvent)="onEdit()"
       ></ngx-extended-pdf-viewer>
+      <span class="wm pdf" [style.left.%]="x()" [style.top.%]="y()">{{ email() }}</span>
     </div>
   `,
 })
@@ -78,6 +79,10 @@ export class PdfViewer {
   private readonly pdf = inject(NgxExtendedPdfViewerService);
   private readonly themeSvc = inject(Theme);
   protected readonly theme = computed(() => (this.themeSvc.dark() ? 'dark' : 'light'));
+  /** The signed-in student's email, floating over the pages so a PDF leak is traceable. */
+  protected readonly email = computed(() => this.api.me()?.email ?? '');
+  protected readonly x = signal(8);
+  protected readonly y = signal(8);
   // Phones and small tablets: a portrait page must fill the width, so page-fit (which fits the
   // whole page into the short viewport) is replaced by page-width and the page borders are dropped.
   private readonly narrowQuery = matchMedia('(max-width: 820px)');
@@ -102,13 +107,21 @@ export class PdfViewer {
       if ((e.ctrlKey || e.metaKey) && ['s', 'p'].includes(e.key?.toLowerCase())) { e.preventDefault(); e.stopImmediatePropagation(); }
     };
     const onNarrow = (e: MediaQueryListEvent) => this.narrow.set(e.matches);
+    const markTimer = setInterval(() => this.moveMark(), 15000);
     window.addEventListener('keydown', block, true);
     this.narrowQuery.addEventListener('change', onNarrow);
     inject(DestroyRef).onDestroy(() => {
       window.removeEventListener('keydown', block, true);
       this.narrowQuery.removeEventListener('change', onNarrow);
+      clearInterval(markTimer);
       if (this.timer) { clearTimeout(this.timer); void this.save(); }
     });
+  }
+
+  /** Same drifting watermark as the video players. */
+  private moveMark(): void {
+    this.x.set(5 + Math.random() * 55);
+    this.y.set(8 + Math.random() * 78);
   }
 
   private current(): object[] {

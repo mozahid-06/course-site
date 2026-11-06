@@ -401,7 +401,9 @@ async function serve(req, env, key, u) {
   const h = new Headers();
   h.set('content-type', MEDIA_TYPES[key.split('.').pop().toLowerCase()] || 'application/octet-stream');
   h.set('accept-ranges', 'bytes');
-  h.set('cache-control', /\.pdf$/i.test(key) ? 'private, max-age=3600' : 'private, no-store');
+  // Nothing from the media route is cacheable: a browser that keeps the bytes keeps a copy
+  // the site cannot account for. PDF.js still streams range requests, so it stays quick.
+  h.set('cache-control', 'private, no-store');
   h.set('x-content-type-options', 'nosniff');
   h.set('content-disposition', 'inline');
   h.set('cross-origin-resource-policy', 'same-origin');
