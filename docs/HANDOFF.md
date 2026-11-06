@@ -172,8 +172,9 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 
 ### Auth
 
-- Cookie `s=<base64url(JSON{uid,exp})>.<base64url(HMAC-SHA256 with SESSION_SECRET)>`, `HttpOnly; Secure; SameSite=Strict`, 7 days.
+- Cookie `s=<base64url(JSON{uid, v, sid, exp})>.<base64url(HMAC-SHA256 with SESSION_SECRET)>`, `HttpOnly; Secure; SameSite=Strict`, 7 days.
 - Each request re-reads the user row, so deleting a user ends their sessions immediately.
+- `users.sid` is the account's current session id (nullable). A student cookie is valid only while its `sid` matches the row, so an account has one live student session and a new login signs the old device out; admins (`is_admin = 1`, including the owner) skip the check. The client clears its session on any `401` (`Api.signOutLocal`) and revalidates on `window focus` / `document visibilitychange` (`Api.refreshMe`).
 - Admin seeding (`seedAdmin`) runs inside `ensureSchema`.
 - CSRF relies on `SameSite=Strict` plus JSON bodies.
 
@@ -314,7 +315,7 @@ Not covered: replacing or versioning an already-uploaded PDF (delete and upload 
 8. Generate a `manifest.json` at upload time so the Worker does not list the bucket (or cache in KV).
 9. Port the Worker to TypeScript, split into modules, add Vitest tests (`@cloudflare/vitest-pool-workers`).
 10. ~~GitHub Actions for build and type checks~~ **done** (`.github/workflows/ci.yml`: `npm ci`, `typecheck`, `build` on PRs and pushes to `main`).
-11. Stateful sessions (a `sessions` table) for instant revocation and device lists.
+11. A `sessions` table for instant revocation and device lists — single-session enforcement already ships via `users.sid` (one live student session, admins exempt).
 12. A paid DRM or per-user watermarking service if leaks become a real problem.
 
 ## 7. Constraints to respect
