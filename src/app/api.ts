@@ -172,6 +172,10 @@ export class Api {
   saveCourseDescription(course: string, description: string): Promise<{ ok: true; course: string; description: string }> {
     return this.req('admin/files/description', { course, description });
   }
+  /** Reads the stored description, so an editor can prefill a course that has no lessons yet. */
+  courseDescription(course: string): Promise<{ course: string; description: string }> {
+    return this.req(`admin/files/description?course=${encodeURIComponent(course)}`);
+  }
 
   uploadStart(key: string, size: number, overwrite = false): Promise<{ uploadId: string; key: string }> {
     return this.req('admin/files/upload/start', { key, size, overwrite });

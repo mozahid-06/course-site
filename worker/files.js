@@ -430,8 +430,13 @@ async function deleteEntry(env, rawPath, hooks) {
   }
   if (!keys.length && !lessons.size) {
     if (p.includes('/') || single) return bad('Not found', 404);
-    const enrolled = await env.DB.prepare('SELECT 1 FROM enrollments WHERE course = ? LIMIT 1').bind(p).first();
-    if (!enrolled) return bad('Not found', 404);
+    // A course row can outlive a partial cleanup: enrollments and course_meta are separate
+    // batches, so a failed delete can leave one behind. Treat either as "something is still
+    // here to clean" and let the statements below finish, instead of 404-ing on a retry.
+    const known = await env.DB.prepare(
+      'SELECT 1 FROM enrollments WHERE course = ? UNION SELECT 1 FROM course_meta WHERE course = ? LIMIT 1',
+    ).bind(p, p).first();
+    if (!known) return bad('Not found', 404);
   }
 
   try {
@@ -478,6 +483,13 @@ async function createFolder(env, rawPath, hooks) {
 }
 
 const DESC_MAX = 2000;
+/** Reads the stored description for one course, whether or not it is listed as a course yet. */
+async function getCourseDescription(env, rawCourse) {
+  const course = cleanPath(rawCourse);
+  if (course === null || !course || course.includes('/')) return bad('That is not a course name');
+  const row = await env.DB.prepare('SELECT description FROM course_meta WHERE course = ?').bind(course).first();
+  return json({ course, description: row ? String(row.description) : '' });
+}
 /** Sets (or clears) the description shown for a course, keyed by its top-level folder name. */
 async function setCourseDescription(env, rawCourse, rawDescription, hooks) {
   const course = cleanPath(rawCourse);
@@ -649,6 +661,10 @@ export async function handleFiles(req, env, path, method, url, hooks) {
   if (path === '/api/admin/files/order' && method === 'POST') {
     const b = await req.json().catch(() => ({}));
     return setEntryPosition(env, b.path, b.position, hooks);
+  }
+
+  if (path === '/api/admin/files/description' && method === 'GET') {
+    return getCourseDescription(env, url.searchParams.get('course'));
   }
 
   if (path === '/api/admin/files/description' && method === 'POST') {

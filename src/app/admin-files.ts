@@ -581,8 +581,13 @@ export class AdminFiles implements OnDestroy {
   }
 
   /** Course descriptions live in D1; the card, the intro and this dialog all read the same value. */
-  protected askDescription(course: string): void {
-    const current = this.api.courses().find((c) => c.title === course)?.description ?? '';
+  protected async askDescription(course: string): Promise<void> {
+    // The course list only carries a course once it has a lesson, so a folder that does not
+    // appear there (an empty course) must read its stored value from the admin route.
+    let current = this.api.courses().find((c) => c.title === course)?.description;
+    if (current === undefined) {
+      try { current = (await this.api.courseDescription(course)).description; } catch { current = ''; }
+    }
     this.openAsk({
       title: `About “${course}”`,
       hint: 'Shown on the course card and at the top of the course. Leave it empty to remove it.',
