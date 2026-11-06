@@ -427,7 +427,7 @@ const SEC_HEADERS = {
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
   'referrer-policy': 'strict-origin-when-cross-origin',
-  'strict-transport-security': 'max-age=31536000',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
 };
