@@ -27,7 +27,7 @@ course-site/
       options-menu.ts    The single hamburger menu (Admin panel / Back, theme switch, Sign out)
       theme.ts           Two-way light/dark switch (localStorage + pre-paint script)
       login.ts           Sign-in form + Google button
-      course.ts          Course list (rows), folder browser, lesson view + bar, Mark as complete
+      course.ts          Course list (cards), folder browser, lesson view + bar, Mark as complete
       player.ts          Video player with moving email watermark
       yt-player.ts       YouTube lesson: iframe player with the same moving email watermark
       pdf-viewer.ts      PDF reader with private notes, hide/reset and full-window mode (download and print stay off)
@@ -52,7 +52,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 <Course>/<Folder>/<Sub>/<file>      nested folders
 ```
 
-- Top-level folder = **course** (shown as a card on the home screen; inside a course the sidebar is its folder outline).
+- Top-level folder = **course** (shown as a card in the home-screen grid, with its description, progress and lesson count; inside a course the sidebar is its folder outline).
 - Sub-folders = folders in the file browser (breadcrumb: `./Courses / Course / Folder /`).
 - Files = **lessons**. Video: `.mp4 .webm .mkv .mov .avi .m4v .m3u8`. Documents: `.pdf`. HLS segments (`.ts`) are hidden from the list.
 - For an HLS lesson, the title is its parent folder name (`<Lesson>/index.m3u8`).
@@ -78,7 +78,7 @@ Bucket name: `course-sourse` (the spelling is in `wrangler.toml`; keep it unless
 - On the first request after this feature is deployed, every existing student is given every current course, so nobody loses access. After that, access is exactly what the admin sets.
 - Payment is manual for now: the student pays you (for example bKash or Nagad), then you give the course in the Admin panel.
 - Access is tied to the **folder name**. Renaming a course in **Admin panel → Files** moves the enrollments with it; renaming it in R2 does not.
-- Home screen: the course list, as dense rows with progress. The site always opens here. Inside a course the sidebar shows the folder tree: folders open and close at any depth, show done/total, expand to the open lesson, remember what was open, and a search box filters lessons.
+- Home screen: the course list as a responsive grid of cards (two per row on desktop, one on phones). Each card shows the course title, its **description** (see below), the progress bar and the lesson count, and is the button that opens the course. The site always opens here. Inside a course the sidebar shows the folder tree: folders open and close at any depth, show done/total, expand to the open lesson, remember what was open, and a search box filters lessons.
 
 ## PDF notes
 
@@ -94,6 +94,7 @@ Everything the owner needs for day-to-day content work, without `rclone`:
 - **Upload:** pick files or drag them onto the open folder. Small files (up to 16 MiB) go in one request; larger ones are split into 8 MiB parts sent in parallel, and the browser uploads them **straight to R2** with URLs the Worker signs, so a multi-gigabyte video costs the Worker nothing. A name that already exists is refused; choose **Replace** if you mean to overwrite.
 - **Reload mid-upload:** the row shows *Paused — re-select the file*. Choose the same file and only the missing parts are sent. If R2 has already dropped the upload, it starts over and says so.
 - **Rename / move:** a lesson keeps its comments, notes, progress and resources; a course rename also keeps its students' access. A folder move also carries its YouTube lessons. A folder cannot be moved inside itself, a lesson cannot be renamed to something the site will not show, and neither an existing file nor a folder that already holds files or lessons is overwritten or merged into.
+- **Description:** each course can carry a short, owner-written **description**. On a top-level (course) row, the **Description** tool opens a small dialog; what you write shows on the course card and as an intro at the top of the course. It is plain text (line breaks are kept, up to 2000 characters) and leaving it empty removes it. It lives in D1 keyed by the course folder, so a course rename carries it and a course delete drops it.
 - **Delete:** removes the file and its student data (including YouTube lessons under a deleted folder); deleting a course also removes its enrollments. If the cleanup is interrupted, running the same delete again finishes it. Deleting a file cannot be undone, and folders require typing the name to confirm.
 - **Order:** every row has a small number box at the left. Type a place and press Enter (or click away) to move the item there; the folder renumbers itself 1..N, and folders, files and YouTube lessons share one sequence. Leave the box blank to put the item back in the default order. Students see a number before every item in the browser; the home-screen course cards can be ordered the same way.
 - **New folder:** a folder at the top level is a course. An empty folder is held by a hidden zero-byte `.keep`.

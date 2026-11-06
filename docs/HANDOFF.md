@@ -29,6 +29,7 @@ A private video course site for a small cohort (about 6 students, growing to a f
 | Session cookie, not signed URLs | Media URLs only work with a valid `HttpOnly` cookie, so copied links are useless. |
 | Course structure derived from the bucket | No lesson table. Uploading files is the only content step. Top folder = course, sub-folders = folders, files = lessons. |
 | File manager inside the Admin panel | The owner needed uploads, renames, moves, deletes and folders without rclone. It works on R2 keys directly and carries the D1 rows in the same operation. |
+| Course descriptions live in D1 (`course_meta`), keyed by the course folder | The text is small relational metadata, not content — it does not belong in R2 (where an object would show up as a lesson) and not in a deploy. Keying it by the top-level folder name means the file manager's own rules carry it: a course rename rewrites `course_meta.course`, and a course delete drops the row, in the same D1 batch as `enrollments`. The owner edits it from a per-row **Description** tool in the Files view, and `listCourse` attaches it to the `/api/course` payload so the card grid and the course intro read one source. |
 | Uploads go browser → R2 with presigned S3 URLs | A Worker request body is capped (about 100 MB), so large videos cannot pass through it. The Worker only signs each part; the bytes go straight to the bucket. |
 | Moves copy through the R2 binding, then rewrite D1, then delete | Avoids S3's 5 GiB copy ceiling and works against the local bucket in dev. A retry is safe: an identical copy at the target is treated as already done. |
 | Resource PDFs live in `<Course>/_resources/<uuid>.pdf`, not next to the lesson | A resource is a file the lesson links to, not a lesson. Hiding the folder from `listCourse` and the file manager keeps it out of the course tree, while the existing media/notes routes and enrollment checks work unchanged. One folder per course also gives course rename and cross-course moves an obvious rule: `file_key` is rewritten with the lesson, and a cross-course move copies the PDF to the destination course's `_resources`. |
@@ -57,7 +58,7 @@ Browser (Angular SPA)
    v
 Cloudflare Worker  (worker/index.js)
    |-- static assets: dist/web/browser   (served directly; Worker only runs for /api/*)
-   |-- D1  binding DB         users, progress, comments, notes, resources, enrollments
+   |-- D1  binding DB         users, progress, comments, notes, resources, enrollments, course descriptions
    |-- R2  binding RESOURCES  <Course>/<Folder>/.../<file>
    '-- R2 S3 API (signed)     the browser's upload parts go straight here
 ```
@@ -78,7 +79,7 @@ Cloudflare Worker  (worker/index.js)
 | `src/app/options-menu.ts` | The single hamburger options menu (Admin panel / Back to course, theme switch, Sign out), shown in full-contrast text colour in the header, the lesson bar and both admin toolbars |
 | `src/app/theme.ts` | Two-way light/dark controller; mirrors the pre-paint script and writes `localStorage['theme']` |
 | `src/app/login.ts` | Sign-in form |
-| `src/app/course.ts` | Course list (dense rows), folder browser with breadcrumb, lesson view + lesson bar, Mark as complete |
+| `src/app/course.ts` | Course list (card grid with descriptions), folder browser with breadcrumb, lesson view + lesson bar, Mark as complete |
 | `src/app/player.ts` | HLS/MP4 lesson: `<hlsjs-video>` or `<video>` inside the Video.js skin (autoplay, un-muted) with a loading cover (spinner; play button if autoplay is blocked) + moving email watermark |
 | `src/app/yt-player.ts` | YouTube lesson: `<video-player><video-skin><youtube-video>` (autoplay, un-muted) with an opaque loading cover until playback (spinner; play button if autoplay is blocked) + the same moving email watermark |
 | `src/app/pdf-viewer.ts` | PDF reader: private notes (auto-save, hide, reset), download/print locked off; draws no chrome of its own |
@@ -105,12 +106,13 @@ comments (id INTEGER PK, lesson TEXT, user_id INTEGER, parent_id INTEGER, body T
 comment_likes (comment_id INTEGER, user_id INTEGER, PRIMARY KEY (comment_id, user_id))
 video_notes (user_id INTEGER, lesson TEXT, body TEXT, updated INTEGER, PRIMARY KEY (user_id, lesson))
 content_order (path TEXT PRIMARY KEY, position INTEGER NOT NULL)   -- admin-chosen order inside one folder: folders, files and YouTube lessons share the sequence; created lazily on the first reorder
+course_meta (course TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '')   -- owner-written course description (plain text, <= 2000 chars); `course` = the top-level folder name, so it is keyed like `enrollments.course`
 resources (id INTEGER PK, lesson TEXT, title TEXT, url TEXT, note TEXT, created_by INTEGER, created INTEGER, kind TEXT, file_key TEXT)   -- kind = 'link' (default) or 'pdf'; for PDFs `url` is empty and `file_key` is the R2 key
 youtube_lessons (id TEXT PRIMARY KEY, yt TEXT NOT NULL, created INTEGER NOT NULL)   -- id = lesson path "<Course>/<Folder>/<Name>", yt = YouTube video id; created in migrate() and seeded once from worker/youtube.js
 attempts (k TEXT PRIMARY KEY, n INTEGER, t INTEGER)   -- login throttling
 ```
 
-Every lesson-shaped table is keyed by the R2 object key. The file manager keeps them attached: a rename/move rewrites `lesson` in `comments`, `video_notes`, `pdf_notes`, `watched` and `resources` in the same operation, a course rename also rewrites `enrollments.course`, and a delete removes all of a lesson's rows (a course delete also removes its enrollments). `content_order` follows the same rule: a rename keeps every position, a move to a different parent drops only the moved root's number (its children keep theirs), and a delete removes the path and its whole subtree. A folder move also carries its `youtube_lessons` rows and their positions; a folder delete removes them.
+Every lesson-shaped table is keyed by the R2 object key. The file manager keeps them attached: a rename/move rewrites `lesson` in `comments`, `video_notes`, `pdf_notes`, `watched` and `resources` in the same operation, a course rename also rewrites `enrollments.course` and `course_meta.course`, and a delete removes all of a lesson's rows (a course delete also removes its enrollments and its `course_meta` row). `content_order` follows the same rule: a rename keeps every position, a move to a different parent drops only the moved root's number (its children keep theirs), and a delete removes the path and its whole subtree. A folder move also carries its `youtube_lessons` rows and their positions; a folder delete removes them.
 
 ### API
 
@@ -120,7 +122,7 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `GET /api/config` | none | `{googleClientId}` |
 | `POST /api/login/google` | none | `{credential}`; verifies the Google ID token (RS256 against Google's JWKS, `iss`, `aud`, `exp`, `email_verified`), matches `google_sub` then invited email, links on first login |
 | `GET /api/me` | session | `{id, email, is_admin}` |
-| `GET /api/course` | session | `[{title, sections:[{title, lessons:[{id, title, kind:'video'|'pdf'|'youtube', done}]}]}]`; `youtube` lessons also carry `yt` (the video id); `section.title` is the sub-path joined by `" / "` or `null`. Built from the bucket listing plus `worker/youtube.js`. Sorted by `content_order` where set. |
+| `GET /api/course` | session | `[{title, description, sections:[{title, lessons:[{id, title, kind:'video'|'pdf'|'youtube', done}]}]}]`; `description` is the owner-written text from `course_meta` (empty string when unset); `youtube` lessons also carry `yt` (the video id); `section.title` is the sub-path joined by `" / "` or `null`. Built from the bucket listing plus `worker/youtube.js`. Sorted by `content_order` where set. |
 | `GET /api/order` | session | `{path: position}` for every saved number in the courses this user can see (students: enrolled only; admins: all). The student browser uses it for its number labels. |
 | `GET /api/media/<url-encoded key>` | session | Allow-listed extensions only; range requests; refuses `Sec-Fetch-Dest: document` |
 | `POST /api/progress` | session | `{lesson, done}` |
@@ -143,8 +145,9 @@ Every lesson-shaped table is keyed by the R2 object key. The file manager keeps 
 | `GET /api/admin/files?prefix=` | admin | One folder: `{path, dirs:[{name,path,position}], files:[{key,name,size,modified,lesson,hls,position}], order:{path:position}}`; `.keep` and `.ts` hidden; sorted by saved positions, then naturally |
 | `POST /api/admin/files/order` | admin | `{path, position:1..9999|null}`; puts the entry at that place in its folder and renumbers the folder 1..N. `null`/blank clears just that entry (default order). `404` if the item no longer exists. |
 | `POST /api/admin/files/folder` | admin | `{path}`; creates `<path>/.keep`; `409` if the folder exists |
+| `POST /api/admin/files/description` | admin | `{course, description}`; upserts the owner-written course description in `course_meta` (plain text, trimmed, `\r\n`→`\n`, capped at 2000 chars; empty clears it); `400` when `course` is empty or contains `/`; `invalidateCourse()` on write |
 | `POST /api/admin/files/move` | admin | `{from, to, kind:'file'|'folder'}`; copies, rewrites the D1 rows, then deletes the originals; `409` on an existing target, `400` on a lesson becoming a non-lesson or a folder moving inside itself |
-| `POST /api/admin/files/delete` | admin | `{path, kind}`; deletes objects first, then the D1 rows; a course delete also removes enrollments |
+| `POST /api/admin/files/delete` | admin | `{path, kind}`; deletes objects first, then the D1 rows; a course delete also removes enrollments and the `course_meta` row |
 | `POST /api/admin/files/upload/start` | admin | `{key, size, overwrite?}` → `{uploadId}`; `409` if the key exists and `overwrite` is false |
 | `POST /api/admin/files/upload/part` | admin | `{key, uploadId, partNumber}` → `{url}`, a presigned PUT that expires in 1 hour |
 | `POST /api/admin/files/upload/url` | admin | `{key, size, overwrite?}` → `{url}` for files up to 16 MiB (one PUT) |
@@ -162,6 +165,7 @@ Secrets (dashboard, never in git): `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSW
 4. `.m3u8` lessons are titled by their parent folder; others by file name without extension.
 5. Sort by `content_order` where a path has a saved position (numbered items first, in that order), then with a numeric-aware collator; folders sort before files at the same level.
 6. Merge `youtube_lessons` from D1 (managed in Admin → Files; seeded once from `worker/youtube.js`). Each row's `id` is split on `/`; the first segment is the course (created if missing, so a YouTube-only course appears), the middle segments form the section title (joined with `" / "`), and the last segment is the lesson name. `ytId()` accepts a watch/`youtu.be`/`embed`/`shorts`/`live` link or a bare id and is used on write; an unusable link is refused at the endpoint. The merged lesson is `{id, title, kind:'youtube', yt}` where `id` is the full path, so progress/comments/notes/resources/enrollments work unchanged. A row whose id matches a real file is skipped (the file wins).
+7. Attach each course's `description` from `course_meta` (keyed by the top-level folder name; empty string when unset), so `/api/course` and the card grid can show it.
 
 `/api/course` and `/api/media/*` then filter by `enrollments` (`myCourses`; admins get everything). The Angular browser (`course.ts`) rebuilds the folder tree from `section.title` for both the main browser (current level) and the sidebar outline (`rows` computed: open folders only, flat list while searching).
 
