@@ -432,6 +432,12 @@ const SEC_HEADERS = {
 
 export default {
   async fetch(req, env) {
+    // Fail closed when the session secret is missing or too short: without a strong secret
+    // the signed session cookie cannot be trusted. The reply is generic and never names the
+    // variable or its value.
+    if (!env.SESSION_SECRET || String(env.SESSION_SECRET).length < 32) {
+      return json({ error: 'Server error' }, 500);
+    }
     const url = new URL(req.url);
     // CSRF defense in depth: state-changing API calls must come from this site
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -494,6 +500,13 @@ const handle = async (req, env) => {
       if (!u) return json({ error: 'Not logged in' }, 401);
 
       if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin });
+      // "Sign out everywhere": bump the session version so every cookie minted before now
+      // fails getUser, then clear this device's cookie too. Available to any user (admins
+      // included) as the least disruptive alternative to forcing single-device login on admins.
+      if (path === '/api/logout/all' && m === 'POST') {
+        await env.DB.prepare('UPDATE users SET ver = ver + 1 WHERE id = ?').bind(u.id).run();
+        return json({ ok: true }, 200, { 'set-cookie': clearCookie(secure) });
+      }
       if (path === '/api/course') {
         const w = new Set((await env.DB.prepare('SELECT lesson FROM watched WHERE user_id = ?').bind(u.id).all()).results.map((r) => r.lesson));
         const mine = await myCourses(env, u);

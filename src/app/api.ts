@@ -109,6 +109,14 @@ export class Api {
     this.order.set({});
   }
 
+  /** Signs out every device for this account by bumping the session version. */
+  async logoutEverywhere(): Promise<void> {
+    await this.req('logout/all', {});
+    this.me.set(null);
+    this.courses.set([]);
+    this.order.set({});
+  }
+
   async setDone(id: string, done: boolean): Promise<void> {
     const apply = (value: boolean) => this.courses.update((courses) => courses.map((c) => ({
       ...c,
