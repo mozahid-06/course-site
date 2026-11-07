@@ -92,9 +92,8 @@ import { NotesControls } from './notes-controls';
       @if (opened(); as r) {
         @defer (on immediate) {
           <div class="lr-viewer" role="dialog" aria-modal="true" [attr.aria-label]="r.title">
-            <!-- The exact lesson bar a PDF lesson shows (see course.ts), so a resource reads
-                 identically to a lesson: Back closes the modal, and the lesson's own controls
-                 stay in reach. -->
+            <!-- The lesson bar a PDF lesson shows (see course.ts), minus the complete button:
+                 Back closes the modal and the shared notes controls stay in reach. -->
             <div class="player-bar">
               <button #backBtn type="button" class="back-btn" aria-label="Back" title="Back" (click)="close()">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
@@ -102,13 +101,6 @@ import { NotesControls } from './notes-controls';
               </button>
               <span class="player-title">{{ r.title }}</span>
               @if (pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
-              <button class="done-btn" [class.p]="!lesson().done" [class.is-done]="lesson().done"
-                [attr.aria-pressed]="lesson().done"
-                [attr.aria-label]="lesson().done ? 'Completed' : 'Mark as complete'"
-                [title]="lesson().done ? 'Completed' : 'Mark as complete'" (click)="toggleDone()">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
-                <span class="lbl">{{ lesson().done ? 'Completed' : 'Mark as complete' }}</span>
-              </button>
             </div>
             <app-pdf-viewer [key]="r.url" />
           </div>
@@ -218,12 +210,6 @@ export class LessonResources {
     this.resumeBackground();
     this.lastFocus?.focus();
     this.lastFocus = null;
-  }
-
-  /** Marks the lesson this resource belongs to as complete, exactly like the lesson bar. */
-  protected toggleDone(): void {
-    const l = this.lesson();
-    void this.api.setDone(l.id, !l.done);
   }
 
   /**
