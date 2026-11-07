@@ -121,16 +121,19 @@ async function seedAdmin(env) {
   }
 }
 async function migrate(env) {
-  const has = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'google_sub'").first();
-  if (!has.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
-  const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
-  if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
-  const hasSid = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'sid'").first();
-  if (!hasSid.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN sid TEXT').run();
-  const hasResKind = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'kind'").first();
-  if (!hasResKind.c) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
-  const hasResFile = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'file_key'").first();
-  if (!hasResFile.c) await env.DB.prepare('ALTER TABLE resources ADD COLUMN file_key TEXT').run();
+  // One round trip for every column check: five separate pragma reads cost five times the
+  // D1 latency on a cold isolate, which is noticeable when the database is far away.
+  const [usersCols, resCols] = await env.DB.batch([
+    env.DB.prepare("SELECT name FROM pragma_table_info('users')"),
+    env.DB.prepare("SELECT name FROM pragma_table_info('resources')"),
+  ]);
+  const userHas = new Set((usersCols.results || []).map((r) => r.name));
+  const resHas = new Set((resCols.results || []).map((r) => r.name));
+  if (!userHas.has('google_sub')) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
+  if (!userHas.has('ver')) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
+  if (!userHas.has('sid')) await env.DB.prepare('ALTER TABLE users ADD COLUMN sid TEXT').run();
+  if (!resHas.has('kind')) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
+  if (!resHas.has('file_key')) await env.DB.prepare('ALTER TABLE resources ADD COLUMN file_key TEXT').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
   // YouTube lessons are managed from the Admin panel. Created here (before listCourse runs
   // below) and seeded once from worker/youtube.js, so the hadYt guard makes a later delete
@@ -154,7 +157,38 @@ async function migrate(env) {
     for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
   }
 }
-const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
+const SCHEMA_DEADLINE_MS = 8000;
+// A D1 binding call has no timeout of its own, so one stalled call used to leave this
+// promise pending forever. Because it is cached, every later request in the same isolate
+// awaited the dead promise and hung too — a single stall took the Worker down until the
+// next deploy. Race it against a deadline so the request fails fast and the cache resets.
+function withDeadline(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new Error('Database temporarily unavailable');
+      e.dbTimeout = true;
+      reject(e);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+export function ensureSchema(env, deadlineMs = SCHEMA_DEADLINE_MS) {
+  if (!ready) {
+    const run = withDeadline(
+      env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)),
+      deadlineMs,
+    );
+    // The abandoned promise cannot be cancelled; dropping it from the cache is what
+    // matters, so the next request retries cleanly (the schema statements are idempotent).
+    const guarded = run.catch((e) => {
+      if (ready === guarded) ready = undefined;
+      throw e;
+    });
+    ready = guarded;
+  }
+  return ready;
+}
 
 // ---- Google sign-in: verify the ID token (RS256 JWT) against Google's public keys ----
 let jwks = { at: 0, keys: [] };
@@ -626,12 +660,14 @@ const handle = async (req, env) => {
     const { pathname: path, protocol } = new URL(req.url);
     const secure = protocol === 'https:';
     const m = req.method;
+    // Sign-in config only mints a nonce and reads an env var, so keep it off the database
+    // path: the login screen (and the Google button) still render when D1 is unavailable.
+    if (path === '/api/config') {
+      const nonce = b64(crypto.getRandomValues(new Uint8Array(16)));
+      return json({ googleClientId: env.GOOGLE_CLIENT_ID || '', nonce }, 200, { 'set-cookie': nonceCookie(nonce, secure) });
+    }
     try {
       await ensureSchema(env);
-      if (path === '/api/config') {
-        const nonce = b64(crypto.getRandomValues(new Uint8Array(16)));
-        return json({ googleClientId: env.GOOGLE_CLIENT_ID || '', nonce }, 200, { 'set-cookie': nonceCookie(nonce, secure) });
-      }
       if (path === '/api/login/google' && m === 'POST') {
         if (!env.GOOGLE_CLIENT_ID) return json({ error: 'Google sign-in is not set up' }, 503);
         const ip = ['i:' + ipOf(req), 40];
@@ -1150,6 +1186,7 @@ const handle = async (req, env) => {
       // A path with a stray "%" (e.g. /api/media/%zz) makes decodeURIComponent throw. That is a
       // bad request, not a server fault, so it must not surface as a 500.
       if (e instanceof URIError) return json({ error: 'Bad request' }, 400);
+      if (e && e.dbTimeout) return json({ error: 'Database temporarily unavailable' }, 503, { 'retry-after': '5' });
       const dup = String(e).includes('UNIQUE');
       return json({ error: dup ? 'That email already exists' : 'Server error' }, dup ? 409 : 500);
     }

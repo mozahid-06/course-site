@@ -34,7 +34,8 @@ const call = (path, { method = 'GET', headers = {}, body, e = env } = {}) =>
 // The Worker memoises schema setup per process, so boot once and reuse the same database.
 let booted;
 before(async () => {
-  booted ||= call('/api/config').then((res) => assert.equal(res.status, 200));
+  // /api/config no longer touches D1, so boot the schema through a database route.
+  booted ||= call('/api/me').then((res) => assert.equal(res.status, 401));
   await booted;
 });
 
