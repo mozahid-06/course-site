@@ -67,18 +67,46 @@ export function r2(files = {}) {
 
 /** A D1-shaped adapter over a node:sqlite database: `prepare(sql).bind(...).run()/first()/all()`. */
 export function d1(raw) {
-  const make = (sql, args = []) => ({
-    run: async () => {
+  // Round-trip telemetry for tests: a batch is one round trip, however many statements it
+  // carries. This lets a test assert that a hot path did not regress into N separate queries.
+  const stats = {
+    roundTrips: 0,
+    batches: 0,
+    batchedStatements: 0,
+    reset() { this.roundTrips = 0; this.batches = 0; this.batchedStatements = 0; },
+  };
+  const exec = {
+    run: (sql, args) => {
       const r = raw.prepare(sql).run(...args);
       return { success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
     },
-    first: async () => raw.prepare(sql).get(...args) ?? null,
-    all: async () => ({ results: raw.prepare(sql).all(...args) }),
-    bind: (...more) => make(sql, more),
-  });
+    first: (sql, args) => raw.prepare(sql).get(...args) ?? null,
+    all: (sql, args) => ({ results: raw.prepare(sql).all(...args) }),
+  };
+  const make = (sql, args = []) => {
+    const stmt = {
+      run: async () => { stats.roundTrips++; return exec.run(sql, args); },
+      first: async () => { stats.roundTrips++; return exec.first(sql, args); },
+      all: async () => { stats.roundTrips++; return exec.all(sql, args); },
+      bind: (...more) => make(sql, more),
+    };
+    // Called by batch(), which already counted this statement's shared round trip.
+    Object.defineProperty(stmt, 'exec', {
+      value: () => (/^\s*(select|with|pragma)\b/i.test(sql)
+        ? { success: true, ...exec.all(sql, args) }
+        : exec.run(sql, args)),
+    });
+    return stmt;
+  };
   return {
     prepare: (sql) => make(sql),
-    batch: (stmts) => Promise.all(stmts.map((s) => s.run())),
+    batch: async (stmts) => {
+      stats.roundTrips++;
+      stats.batches++;
+      stats.batchedStatements += stmts.length;
+      return stmts.map((s) => s.exec());
+    },
+    stats,
   };
 }
 
