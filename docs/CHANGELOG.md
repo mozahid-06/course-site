@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Changed (lesson bar)
+- **The lesson bar now has one Back button instead of a Back/Forward pair.** The browser-style ←/→ pair took the width of two controls and Forward was almost always disabled (the app rarely leaves forward history), so it read as clutter in the video, YouTube and PDF lesson bars. `app-nav-buttons` became `app-back-button` — a single `← Back` control that only ever moves through the app's own history and greys out at the start of it. On phones the label is dropped (like *Mark as complete*) so a PDF lesson keeps its width; the arrow stays 40 px for touch. The unused forward tracking (`furthest`, `canForward`, `forward()`) was removed from `NavHistory`. `npm test` 51/51, `typecheck`, `build`.
+
 ### Fixed (Google sign-in nonce)
 - **"Google sign-in failed" no longer happens because the nonce went stale.** The client cached the `/api/config` response for the whole SPA lifetime and the server rotated the nonce (and overwrote the single `gn` cookie) on every call, so a page left open past the cookie's 12-hour life — or an SPA page reached after a logout, or a second tab — presented a nonce that no longer matched the cookie and the callback was rejected with `401`. The login form now fetches a **fresh** config when it mounts (`Api.freshGoogleConfig`), and `/api/config` **reuses** the nonce the browser already holds instead of rotating it, so two tabs and a long-lived page agree. The value is still unguessable and HttpOnly, so replay stays bound to the browser. Verified with a new `worker/security.test.mjs` test (a second call with the cookie returns the same nonce; a junk cookie is replaced, never reflected) — `npm test` 51/51, `typecheck`, `build`.
 

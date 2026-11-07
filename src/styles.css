@@ -53,8 +53,8 @@ button.link:hover:not(:disabled){background:transparent!important;color:var(--te
 .icon-btn:hover:not(:disabled){background:var(--hover);color:var(--text)}
 .icon-btn:disabled{opacity:.35;cursor:default}
 .icon-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-/* Browser-style back/forward pair, used in the lesson bar. */
-.nav-btns{display:inline-flex;align-items:center;gap:.1rem;flex:none}
+/* Single Back control in the lesson bar (video, YouTube and PDF). */
+.back-btn-wrap{display:inline-flex;align-items:center;flex:none}
 
 /* Fields */
 input:where(:not(ngx-extended-pdf-viewer *)):where(:not([type=checkbox])):where(:not([type=radio])):where(:not([type=file])){
@@ -541,6 +541,8 @@ dialog form{display:grid;gap:.6rem;margin-bottom:1rem}
      phones (aria-label/title remain), so a PDF lesson keeps as much of the screen as
      possible: the lesson bar + the PDF.js toolbar only. */
   .player-bar{flex-wrap:nowrap;gap:.15rem .4rem;padding:.35rem .5rem;min-height:0}
+  .player-bar .back-btn{flex:0 0 auto;width:40px;min-height:40px;padding:0;justify-content:center}
+  .player-bar .back-btn .lbl{display:none}
   .player-bar .done-btn .lbl{display:none}
   .player-bar .done-btn{flex:0 0 auto;width:40px;min-height:40px;padding:0;justify-content:center}
   .player-body{padding:.6rem .6rem 1rem;gap:.6rem;overflow:visible}

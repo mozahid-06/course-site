@@ -9,7 +9,7 @@ import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
 import { OptionsMenu } from './options-menu';
 import { NotesControls } from './notes-controls';
-import { NavButtons } from './nav-buttons';
+import { BackButton } from './back-button';
 import { statusMark, type StatusMark } from './lesson-status';
 import { courseUrl, folderUrl, lessonUrl, parseCourseTail, type CourseView } from './course-route';
 
@@ -18,7 +18,7 @@ type View = CourseView;
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu, NotesControls, NavButtons],
+  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu, NotesControls, BackButton],
   template: `
     <div class="layout">
 
@@ -90,7 +90,7 @@ type View = CourseView;
           <!-- Player / PDF viewer -->
           @if (v.kind === 'player' && lesson(); as l) {
             <div class="player-bar">
-              <app-nav-buttons />
+              <app-back-button />
               <span class="player-title">{{ l.title }}</span>
 
               <!-- PDF: the notes controls are the same shared component the resource modal uses. -->
