@@ -24,6 +24,13 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+/**
+ * A JSON API call that gets no answer within this window is treated as failed, so a stalled
+ * server can never leave a screen blank forever. The server already deadlines its own DB
+ * queries well under this; the client timeout is the backstop for a network-level hang.
+ */
+const REQ_TIMEOUT_MS = 20000;
+
 @Injectable({ providedIn: 'root' })
 export class Api {
   /** undefined = still checking the session, null = signed out */
@@ -45,11 +52,28 @@ export class Api {
   }
 
   private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
-    const res = await fetch('/api/' + path, body === undefined && !method ? {} : {
-      method: method ?? 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch('/api/' + path, {
+        signal: ctrl.signal,
+        ...(body === undefined && !method ? {} : {
+          method: method ?? 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      });
+    } catch (e) {
+      // Our own deadline fired: report it like any other failed call so the caller can recover
+      // (the sign-in screen still renders, because /api/config does no database work).
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        throw new ApiError('The server is taking too long to respond. Please try again.', 0);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) this.signOutLocal();
     if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);

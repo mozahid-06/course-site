@@ -173,6 +173,60 @@ function withDeadline(promise, ms) {
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
+
+// The schema gate has its own deadline (above), but every later query in a request is a
+// fresh D1 call with no timeout of its own: a single stalled one hung the request — and a
+// client that never times out — forever. This wrapper races every query against the same
+// deadline, so a stall answers 503 instead of pinning the connection. It is transparent:
+// `prepare().bind(...).first()/all()/run()/raw()` resolve to the real value, and `batch`
+// gets the original statement objects back so workerd's own binding checks still pass.
+const DB_DEADLINE_MS = 8000;
+const RAW_STMT = Symbol('rawStatement');
+const QUERY_TERMINALS = new Set(['first', 'all', 'run', 'raw']);
+
+function guardStatement(stmt, ms) {
+  return new Proxy(stmt, {
+    get(target, prop, receiver) {
+      if (prop === RAW_STMT) return target;
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function') return value;
+      if (prop === 'bind') return (...args) => guardStatement(value.apply(target, args), ms);
+      if (QUERY_TERMINALS.has(prop)) return (...args) => withDeadline(value.apply(target, args), ms);
+      return value.bind(target);
+    },
+  });
+}
+
+const guardedDbCache = new WeakMap();
+export function guardDb(DB, ms = DB_DEADLINE_MS) {
+  if (!DB || typeof DB.prepare !== 'function') return DB;
+  let guarded = guardedDbCache.get(DB);
+  if (!guarded) {
+    const target = DB;
+    guarded = new Proxy(target, {
+      get(db, prop, receiver) {
+        if (prop === 'prepare') return (query) => guardStatement(target.prepare(query), ms);
+        // Unwrap the guarded statements so the real binding gets real D1PreparedStatements.
+        if (prop === 'batch') return (stmts) => withDeadline(target.batch(stmts.map((s) => (s && s[RAW_STMT]) || s)), ms);
+        if (prop === 'exec') return (query) => withDeadline(target.exec(query), ms);
+        const value = Reflect.get(db, prop, receiver);
+        return typeof value === 'function' ? value.bind(db) : value;
+      },
+    });
+    guardedDbCache.set(DB, guarded);
+  }
+  return guarded;
+}
+
+/** Route a request's env through the per-query deadline so no D1 call can hang it. */
+export function guardEnv(env) {
+  return new Proxy(env, {
+    get(target, prop, receiver) {
+      if (prop === 'DB') return guardDb(target.DB);
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
 export function ensureSchema(env, deadlineMs = SCHEMA_DEADLINE_MS) {
   if (!ready) {
     const run = withDeadline(
@@ -648,7 +702,7 @@ export default {
         return json({ error: 'Forbidden' }, 403);
       }
     }
-    const res = await handle(req, env);
+    const res = await handle(req, guardEnv(env));
     for (const [k, v] of Object.entries(SEC_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
     if (!res.headers.has('cache-control')) res.headers.set('cache-control', 'no-store');
     return res;
