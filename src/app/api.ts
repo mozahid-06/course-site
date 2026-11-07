@@ -118,6 +118,19 @@ export class Api {
     return this.googleCfg;
   }
 
+  /**
+   * Fetches the sign-in config again rather than reusing the cached copy, and returns it.
+   * The nonce has to match the `gn` cookie the browser holds at the moment Google is
+   * initialized: a form left open past the cookie's 12-hour life would otherwise present a
+   * nonce the server no longer accepts and the Google callback fails with no way to
+   * recover. The call is cheap — `/api/config` does no database work.
+   */
+  async freshGoogleConfig(): Promise<GoogleConfig> {
+    this.configReq = this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
+    this.googleCfg = await this.configReq;
+    return this.googleCfg;
+  }
+
   /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
   async googleClientId(): Promise<string> {
     return (await this.googleConfig()).googleClientId;

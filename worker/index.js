@@ -663,7 +663,12 @@ const handle = async (req, env) => {
     // Sign-in config only mints a nonce and reads an env var, so keep it off the database
     // path: the login screen (and the Google button) still render when D1 is unavailable.
     if (path === '/api/config') {
-      const nonce = b64(crypto.getRandomValues(new Uint8Array(16)));
+      // Reuse the nonce this browser already holds. Rotating it on every call breaks a page
+      // that is mid sign-in (a second tab, or a form left open past the 12h cookie life),
+      // because the callback would echo a nonce the cookie no longer matches. The value is
+      // still unguessable and HttpOnly, so replay stays bound to this browser.
+      const existing = nonceOf(req);
+      const nonce = /^[A-Za-z0-9_-]{16,}$/.test(existing) ? existing : b64(crypto.getRandomValues(new Uint8Array(16)));
       return json({ googleClientId: env.GOOGLE_CLIENT_ID || '', nonce }, 200, { 'set-cookie': nonceCookie(nonce, secure) });
     }
     try {

@@ -93,6 +93,20 @@ test('Google sign-in binds the token to a nonce the page got from /api/config', 
   assert.equal(nonceOk(body.nonce, ''), false);
 });
 
+test('/api/config keeps the nonce a browser already holds', async () => {
+  const first = await call('/api/config');
+  const n1 = (await first.json()).nonce;
+  const cookie = (first.headers.get('set-cookie') || '').split(';')[0];
+  assert.ok(cookie.startsWith('gn=' + n1), 'the nonce is set as a cookie');
+  const second = await call('/api/config', { headers: { cookie } });
+  assert.equal((await second.json()).nonce, n1, 'a second call does not rotate the bound nonce');
+  // A junk cookie must not be reflected back as the nonce.
+  const junk = await call('/api/config', { headers: { cookie: 'gn=!!not-a-nonce!!' } });
+  const n3 = (await junk.json()).nonce;
+  assert.notEqual(n3, '!!not-a-nonce!!');
+  assert.match(n3, /^[A-Za-z0-9_-]{16,}$/);
+});
+
 test('a malformed percent-escape in a path is a 400, not a 500', async () => {
   const email = await addUser();
   await enroll(email, 'Course');
