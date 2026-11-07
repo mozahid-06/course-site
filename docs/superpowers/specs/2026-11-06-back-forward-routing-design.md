@@ -1,7 +1,7 @@
 # Back/forward navigation with the Angular Router — design
 
 **Date:** 2026-11-06
-**Status:** Implemented on `dev` (awaiting test-account review)
+**Status:** Implemented on `dev` (awaiting test-account review). **Update (2026-11-07):** the on-screen Back/Forward pair described below was replaced by a single **Back** button (`app-back-button`, formerly `app-nav-buttons`). The URL-per-screen history, deep links and native back/forward this spec is really about are unchanged; only the visible Forward control was dropped.
 
 ## Intent
 The course screens are one in-memory stack (`course list → folder(s) → lesson`)
