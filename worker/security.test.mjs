@@ -3,6 +3,7 @@
 import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { invalidateCourse, nonceOk } from './index.js';
+import { pace } from './limits.js';
 import { db, r2, hashPw } from './harness.mjs';
 // The client decoder is the contract for the scrambled payload, so the test decodes the
 // real response with the real client code rather than a copy of the algorithm.
@@ -19,6 +20,7 @@ const FILES = {
   'Course/notes.pdf': '%PDF-1.4\nCourse notes',
   'Course/clip.mp4': new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
   'Course/big.mp4': new Uint8Array(5 * 1024 * 1024),
+  'Course/paced.pdf': new Uint8Array(520000), // just over a 5-second burst at 0.8 Mbps
   'Other/hidden.pdf': '%PDF-1.4\nOther course',
 };
 
@@ -171,6 +173,49 @@ test('media: a range larger than one chunk is capped', async () => {
   assert.equal(Number(res.headers.get('content-length')), 4 * 1024 * 1024, 'one chunk, not the whole file');
   const tail = await call('/api/media/Course/big.mp4', { headers: { ...browser(cookie, 'video'), range: 'bytes=100000-6000000' } });
   assert.equal(Number(tail.headers.get('content-length')), 4 * 1024 * 1024, 'an oversized explicit range is capped too');
+});
+
+test('media: a PDF body is paced, so one request cannot dump the file at wire speed', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  // 0.8 Mbps = 100,000 bytes/second; a 5-second burst is 500,000 bytes, so a 520 KB body
+  // must spend roughly 200 ms waiting. Timers never fire early, so a lower bound is stable.
+  const e = { ...env, MAX_PDF_MBPS: 0.8 };
+  const started = Date.now();
+  const res = await call('/api/media/Course/paced.pdf', { headers: browser(cookie), e });
+  assert.equal(res.status, 200);
+  const reader = res.body.getReader();
+  let total = 0;
+  let firstMs = null;
+  let slices = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (firstMs === null) firstMs = Date.now() - started;
+    total += value.byteLength;
+    slices++;
+  }
+  const elapsed = Date.now() - started;
+  assert.equal(total, 520000, 'the whole body still arrives');
+  assert.ok(slices > 1, 'a big chunk is delivered in pieces, got ' + slices);
+  assert.ok(firstMs < 100, 'the first bytes arrive inside the burst, got ' + firstMs + 'ms');
+  assert.ok(elapsed >= 150, 'the body still waited at the rate, got ' + elapsed + 'ms');
+});
+
+test('the pacer allows a burst, then charges the rest at the configured rate', () => {
+  const rate = 1000; // bytes/second
+  const burst = 1000; // one second of bytes flow without waiting
+  // Inside the burst: free.
+  let step = pace(burst, { rate, burst, bytes: 500, elapsedMs: 0 });
+  assert.equal(step.waitMs, 0, 'the burst is free');
+  // 500 bytes of credit, then 1000 more: the 500 over budget cost half a second.
+  step = pace(step.tokens, { rate, burst, bytes: 1000, elapsedMs: 0 });
+  assert.equal(Math.round(step.waitMs), 500, 'over-budget bytes wait at the rate');
+  // Waiting refills exactly what it charged, so the bucket is back to zero, never negative.
+  assert.ok(step.tokens >= 0 && step.tokens < 1, 'the wait refills the bucket: ' + step.tokens);
+  // An idle second refills the whole burst, so a pause is not punished.
+  assert.equal(pace(0, { rate, burst, bytes: 500, elapsedMs: 1000 }).waitMs, 0, 'an idle second refills');
 });
 
 test('PDF notes: only a real PDF lesson or a real resource PDF is accepted', async () => {

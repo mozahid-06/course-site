@@ -48,9 +48,10 @@ A new third-party host must be added to this list deliberately. The only wildcar
   - Each answer is at most 4 MB, so a whole file needs hundreds of requests.
   - Each student's total media speed is capped at `MAX_MBPS` (default 12 Mbit/s, with a 20-second burst for buffering and seeking). Requests above the cap are delayed, not rejected, so playback stays smooth while bulk downloading is slow. Admins are exempt. **This cap is per Worker instance, so it is best effort** and does not coordinate across instances.
   - Raise `MAX_MBPS` if a high-bitrate video buffers; lower it to slow downloads further.
+  - **PDFs are paced by body, not by request.** PDF.js always opens a PDF with one plain `GET` (it only switches to byte ranges for files larger than twice its chunk size, and that first request — like a downloader's — carries no `Range`), so a PDF request cannot be refused or chunk-capped without breaking the viewer. Instead every PDF body flows through a per-student token bucket at `MAX_PDF_MBPS` (default: `MAX_MBPS`) with a 5-second burst, so a single response cannot dump a whole file at wire speed. The bytes still arrive, just slowly, and opening the first pages is unaffected.
 - Player: native download, remote playback and Picture-in-Picture are off, right-click is off, and the student's email floats over the video.
 - PDF viewer: print, download and open buttons are removed, `supportsDownloading` is `false`, `Ctrl/Cmd+S` and `+P` are blocked, drag-and-drop open is off and the context menu is off. Download must stay disabled. The same drifting **per-student email watermark** the video player uses is drawn over the pages, in a dark translucent ink so it shows on light pages.
-- PDF responses are `Cache-Control: private, no-store`, like video. PDF.js streams range requests and the viewer/worker scripts are prefetched, so opening a PDF stays quick; the browser just does not keep the bytes.
+- PDF responses are `Cache-Control: private, no-store`, like video, and the viewer/worker scripts are prefetched, so the bytes are not kept by the browser. The body is paced (`MAX_PDF_MBPS`), so grabbing the file is slow.
 - PDF notes are private: every `/api/notes` query is scoped to the signed-in user and the course is checked; notes are capped at about 1.5 MB per PDF.
 - `POST /api/progress` now requires the lesson to exist and the course to be granted (404/403 otherwise), like comments, notes and resources.
 - Printing or "Save as PDF" of the web page itself produces a blank page.
@@ -60,7 +61,7 @@ These run *inside* the student's browser. They watch the same requests the playe
 
 ## Known gaps (what a determined student can still do)
 1. Copy the cookie and the `Sec-Fetch-*` headers into a script or `yt-dlp` and download. The browser gate raises the effort; it is not a lock.
-2. Plain MP4/WebM files are a single downloadable object once a script passes the gate. HLS (`tools/make-hls.sh`) splits them into segments, which is more work to reassemble (`yt-dlp` still can). Encrypting HLS segments with AES-128 helps little, because the key must be given to the legitimate player too.
+2. Plain MP4/WebM files are a single downloadable object once a script passes the gate. HLS (`tools/make-hls.sh`) splits them into segments, which is more work to reassemble (`yt-dlp` still can). Encrypting HLS segments with AES-128 helps little, because the key must be given to the legitimate player too. A PDF likewise comes down in one request, but its body is paced (`MAX_PDF_MBPS`), so a full grab is slow.
 3. Screen recording and phone cameras cannot be stopped. The email watermark makes leaks traceable, but it is not visible in the browser's native fullscreen.
 4. The scrape limit is now shared through D1, but a script that passes the `Sec-Fetch` gate can still open up to 20 lessons an hour; the speed cap is still per instance and best effort.
 5. Sessions last 7 days. A student who shares a password or Google account can be signed out from elsewhere with "Sign out everywhere", but there is no device limit.
