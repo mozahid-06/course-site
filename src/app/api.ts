@@ -7,7 +7,7 @@ export interface CourseData { title: string; description: string; locked?: boole
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
 export interface YoutubeLesson { id: string; course: string; folder: string; lesson: string; yt: string }
 export interface BulkResult { added: { email: string; password?: string }[]; skipped: { email: string; reason: string }[] }
-export interface Me { id: number; email: string; is_admin: number; ytKey?: string }
+export interface Me { id: number; email: string; is_admin: number; name?: string; ytKey?: string }
 export interface Comment {
   id: number; parent_id: number | null; body: string; created: number;
   name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;

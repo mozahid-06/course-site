@@ -170,6 +170,18 @@ const unusablePw = async () => '!';
 const isOwner = (env, email) => !!env.ADMIN_EMAIL && email === String(env.ADMIN_EMAIL).trim().toLowerCase();
 const validEmail = (e) => typeof e === 'string' && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 const validPw = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
+// Comments show a stable, non-identifying handle rather than the account's email: on a small
+// course the local part of an address is easy to guess from, so it must not appear in a public
+// thread. The handle is derived from the account id, so it is the same everywhere and never
+// changes, but carries no personal information.
+const HANDLE_ADJ = ['Bright', 'Calm', 'Cheerful', 'Clever', 'Curious', 'Eager', 'Gentle', 'Happy', 'Kind', 'Lively', 'Merry', 'Noble', 'Patient', 'Quick', 'Quiet', 'Sharp', 'Steady', 'Sunny', 'Swift', 'Warm', 'Wise', 'Brave', 'Bold', 'Cosmic', 'Daring', 'Honest', 'Humble', 'Jolly', 'Keen', 'Lucky', 'Mellow', 'Neat', 'Polite', 'Proud', 'Vivid'];
+const HANDLE_ANIMAL = ['Badger', 'Bear', 'Beaver', 'Bison', 'Bobcat', 'Cheetah', 'Crane', 'Deer', 'Dolphin', 'Eagle', 'Falcon', 'Finch', 'Fox', 'Gecko', 'Goose', 'Heron', 'Ibis', 'Jaguar', 'Koala', 'Lemur', 'Lynx', 'Marten', 'Moose', 'Newt', 'Otter', 'Owl', 'Panda', 'Parrot', 'Puma', 'Raven', 'Robin', 'Salmon', 'Seal', 'Sparrow', 'Stork', 'Swan', 'Tiger', 'Turtle', 'Wolf', 'Wren', 'Yak', 'Zebra'];
+function displayName(id) {
+  let h = 2166136261;
+  for (const ch of String(id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  h >>>= 0;
+  return HANDLE_ADJ[h % HANDLE_ADJ.length] + ' ' + HANDLE_ANIMAL[(h >>> 8) % HANDLE_ANIMAL.length];
+}
 
 // Bucket structure:
 //   <Course>/<file>                  → course with a flat lesson
@@ -494,7 +506,11 @@ const handle = async (req, env) => {
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
         const em = String(email || '').trim().toLowerCase();
-        const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40]];
+        // Three counters: a tight one per email+IP (a single machine guessing one account), a
+        // looser per-IP one (one machine guessing many accounts), and a per-email one so a
+        // guess spread across many IPs still slows down. The per-email cap is high enough that
+        // only a real attack reaches it, and it expires with the same 15-minute window.
+        const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40], ['e:' + em, 30]];
         if (await locked(env, keys)) return tooMany();
         const pass = String(password || '');
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
@@ -512,7 +528,7 @@ const handle = async (req, env) => {
       const u = await getUser(req, env);
       if (!u) return json({ error: 'Not logged in' }, 401);
 
-      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin, ytKey: await sessionKey(env.SESSION_SECRET, u.id, u.sid) });
+      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin, name: displayName(u.id), ytKey: await sessionKey(env.SESSION_SECRET, u.id, u.sid) });
       // "Sign out everywhere": bump the session version so every cookie minted before now
       // fails getUser, then clear this device's cookie too. Available to any user (admins
       // included) as the least disruptive alternative to forcing single-device login on admins.
@@ -620,13 +636,13 @@ const handle = async (req, env) => {
         const access = await lessonAccess(env, u, key);
         if (access !== 'ok') return accessError(access);
         if (m === 'GET') {
-          const rows = (await env.DB.prepare('SELECT c.id, c.parent_id, c.body, c.created, c.user_id, u.email FROM comments c JOIN users u ON u.id = c.user_id WHERE c.lesson = ? ORDER BY c.created DESC LIMIT 500').bind(key).all()).results;
+          const rows = (await env.DB.prepare('SELECT c.id, c.parent_id, c.body, c.created, c.user_id FROM comments c WHERE c.lesson = ? ORDER BY c.created DESC LIMIT 500').bind(key).all()).results;
           const likes = (await env.DB.prepare('SELECT comment_id, COUNT(*) n FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE lesson = ?) GROUP BY comment_id').bind(key).all()).results;
           const mine = new Set((await env.DB.prepare('SELECT cl.comment_id id FROM comment_likes cl JOIN comments c ON c.id = cl.comment_id WHERE c.lesson = ? AND cl.user_id = ?').bind(key, u.id).all()).results.map((r) => r.id));
           const count = new Map(likes.map((r) => [r.comment_id, r.n]));
           return json({
             comments: rows.map((r) => {
-              const name = String(r.email || '?').split('@')[0] || '?';
+              const name = displayName(r.user_id);
               return {
                 id: r.id, parent_id: r.parent_id, body: r.body, created: r.created,
                 name, initial: name[0].toUpperCase(),
@@ -651,7 +667,7 @@ const handle = async (req, env) => {
           if (recent.n >= 10) return json({ error: 'You are commenting too fast. Try again in a few minutes.' }, 429);
           const now = Date.now();
           const res = await env.DB.prepare('INSERT INTO comments (lesson, user_id, parent_id, body, created) VALUES (?, ?, ?, ?, ?)').bind(key, u.id, parent, body, now).run();
-          const name = u.email.split('@')[0];
+          const name = displayName(u.id);
           return json({ comment: { id: res.meta.last_row_id, parent_id: parent, body, created: now, name, initial: name[0].toUpperCase(), likes: 0, liked: false, own: true, can_delete: true } });
         }
       }
@@ -930,6 +946,9 @@ const handle = async (req, env) => {
       }
       return json({ error: 'Not found' }, 404);
     } catch (e) {
+      // A path with a stray "%" (e.g. /api/media/%zz) makes decodeURIComponent throw. That is a
+      // bad request, not a server fault, so it must not surface as a 500.
+      if (e instanceof URIError) return json({ error: 'Bad request' }, 400);
       const dup = String(e).includes('UNIQUE');
       return json({ error: dup ? 'That email already exists' : 'Server error' }, dup ? 409 : 500);
     }

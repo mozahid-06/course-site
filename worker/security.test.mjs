@@ -76,6 +76,17 @@ test('API responses carry HSTS (includeSubDomains) and are not cacheable', async
   assert.equal(res.headers.get('cache-control'), 'no-store');
 });
 
+test('a malformed percent-escape in a path is a 400, not a 500', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  for (const path of ['/api/media/Course/%', '/api/notes/%', '/api/lesson/%/comments', '/api/lesson/%/yt']) {
+    const res = await call(path, { headers: browser(cookie) });
+    assert.equal(res.status, 400, path + ' -> ' + res.status);
+    assert.deepEqual(await res.json(), { error: 'Bad request' });
+  }
+});
+
 test('a failed login reveals nothing about whether the email exists', async () => {
   const known = await addUser();
   const a = await login(known, { pw: 'wrong-password', ip: '10.0.0.2' });
@@ -94,6 +105,18 @@ test('login throttling locks an email+IP after 8 failures', async () => {
   }
   const { res } = await login(email, { pw: 'nope', ip });
   assert.equal(res.status, 429, 'the 9th attempt is throttled');
+});
+
+test('login throttling also counts failures per email, across many IPs', async () => {
+  const email = await addUser();
+  // Each attempt comes from a different IP, so the email+IP cap (8) and the per-IP cap (40)
+  // never trip: only a per-email counter can catch a distributed guess against one account.
+  for (let i = 0; i < 30; i++) {
+    const { res } = await login(email, { pw: 'nope', ip: `10.2.${i}.1` });
+    assert.equal(res.status, 401, `attempt ${i + 1} is a normal rejection`);
+  }
+  const { res } = await login(email, { pw: 'nope', ip: '10.3.0.1' });
+  assert.equal(res.status, 429, 'the account is throttled even though every IP is new');
 });
 
 test('media: the browser gate and the range-only rule are enforced', async () => {
@@ -226,6 +249,32 @@ test('YouTube ids are fetched per lesson and never appear in /api/course', async
   assert.equal((await call('/api/lesson/Course/Clip/yt', { headers: { cookie: out.cookie } })).status, 403);
   // ...and a non-YouTube lesson answers 404, not an id.
   assert.equal((await call('/api/lesson/Course/notes.pdf/yt', { headers: { cookie } })).status, 404);
+});
+
+test('comments show a stable handle, never the email local part', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const headers = { cookie, origin: ORIGIN, 'content-type': 'application/json' };
+  const url = '/api/lesson/Course/notes.pdf/comments';
+
+  const posted = await call(url, { method: 'POST', headers, body: JSON.stringify({ body: 'hello' }) });
+  assert.equal(posted.status, 200);
+  const { comment } = await posted.json();
+  const me = await (await call('/api/me', { headers: { cookie } })).json();
+  assert.equal(comment.name, me.name, 'the posted handle matches the one /api/me reports');
+  assert.ok(comment.name && !comment.name.includes('@'), 'the handle is not an email');
+  assert.ok(!comment.name.includes(email.split('@')[0]), 'the email local part is not shown');
+
+  const list = await (await call(url, { headers: { cookie } })).json();
+  assert.equal(list.comments[0].name, comment.name, 'the handle is stable across reads');
+  assert.ok(!JSON.stringify(list).includes(email), 'the email never appears in the thread');
+
+  const email2 = await addUser();
+  await enroll(email2, 'Course');
+  const two = await login(email2, { ip: '10.5.5.5' });
+  const posted2 = await call(url, { method: 'POST', headers: { cookie: two.cookie, origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ body: 'hi' }) });
+  assert.notEqual((await posted2.json()).comment.name, comment.name, 'different accounts get different handles');
 });
 
 test('sign out everywhere ends every session for the account', async () => {
