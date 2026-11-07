@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
 import { AnnotationEditorLayerRenderedEvent, NgxExtendedPdfViewerModule, NgxExtendedPdfViewerService, pdfDefaultOptions } from 'ngx-extended-pdf-viewer';
 import { Api } from './api';
 import { Theme } from './theme';
@@ -74,7 +74,7 @@ type Note = Parameters<NgxExtendedPdfViewerService['addEditorAnnotation']>[0];
     </div>
   `,
 })
-export class PdfViewer {
+export class PdfViewer implements OnInit {
   private readonly api = inject(Api);
   private readonly pdf = inject(NgxExtendedPdfViewerService);
   private readonly themeSvc = inject(Theme);
@@ -158,7 +158,7 @@ export class PdfViewer {
   }
 
   /** The stored URL for one image, uploading it on first use. */
-  private assetUrl(dataUrl: string): Promise<string> {
+  private assetUrl(dataUrl: string, key: string): Promise<string> {
     let pending = this.assetByDataUrl.get(dataUrl);
     if (!pending) {
       pending = (async () => {
@@ -166,7 +166,7 @@ export class PdfViewer {
         if (!parsed) return dataUrl; // not an image we can decode: leave it untouched
         const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', parsed.bytes as unknown as BufferSource));
         const id = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
-        return (await this.api.uploadNoteAsset(this.key(), id, parsed.bytes, parsed.type)).url;
+        return (await this.api.uploadNoteAsset(key, id, parsed.bytes, parsed.type)).url;
       })();
       this.assetByDataUrl.set(dataUrl, pending);
       // A failed upload must not poison the cache: retry on the next save.
@@ -176,16 +176,32 @@ export class PdfViewer {
   }
 
   /** Replace every pasted-image data URL in a notes payload with its stored R2 URL. */
-  private async withAssets(notes: object[]): Promise<object[]> {
+  private async withAssets(notes: object[], key: string): Promise<object[]> {
     const out: object[] = [];
     for (const note of notes) {
       const rec = note as Record<string, unknown>;
       const bitmapUrl = rec['bitmapUrl'];
       if (typeof bitmapUrl !== 'string' || !bitmapUrl.startsWith('data:')) { out.push(note); continue; }
-      try { out.push({ ...rec, bitmapUrl: await this.assetUrl(bitmapUrl) }); }
+      try { out.push({ ...rec, bitmapUrl: await this.assetUrl(bitmapUrl, key) }); }
       catch { out.push(note); } // keep the original: an unsaved image beats a lost one
     }
     return out;
+  }
+
+  // The notes are fetched once, as early as possible, and shared by init and pages-loaded.
+  // Waiting for `pagesLoaded` before starting the request put it on the critical path, so the
+  // notes only appeared after the PDF had fully loaded plus a server round trip; starting here
+  // overlaps that round trip with the PDF download and the notes are ready when pages render.
+  private notesPromise: { key: string; p: Promise<object[]> } | null = null;
+  private loadNotes(key: string): Promise<object[]> {
+    if (!this.notesPromise || this.notesPromise.key !== key) {
+      this.notesPromise = { key, p: this.api.getNotes(key).then((r) => this.withAssets(r.data ?? [], key)) };
+    }
+    return this.notesPromise.p;
+  }
+
+  ngOnInit(): void {
+    void this.loadNotes(this.key()).catch(() => { /* surfaces in onLoaded */ });
   }
 
   private async apply(notes: object[]): Promise<void> {
@@ -216,7 +232,7 @@ export class PdfViewer {
     this.hidden.set(false);
     this.status.set('');
     try {
-      this.saved = await this.withAssets((await this.api.getNotes(key)).data ?? []);
+      this.saved = await this.loadNotes(key);
     } catch {
       if (key === this.key()) this.status.set('Could not load your notes');
     }
@@ -280,7 +296,7 @@ export class PdfViewer {
     this.timer = undefined;
     if (this.loadedKey !== this.key()) return;
     let notes: object[];
-    try { notes = await this.withAssets(this.payload()); } catch { return; }
+    try { notes = await this.withAssets(this.payload(), this.key()); } catch { return; }
     if (JSON.stringify(notes) === JSON.stringify(this.saved)) return;
     this.status.set('Saving…');
     try { await this.api.saveNotes(this.key(), notes); this.saved = notes; this.status.set('Saved'); }
