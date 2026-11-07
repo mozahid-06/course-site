@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+### Hardened (PDF downloads)
+- **A PDF can no longer be dumped at wire speed in one request.** Videos are already served only to byte-range requests, so a plain `GET` is refused and bulk downloading needs hundreds of capped, speed-limited requests. A PDF cannot use that rule: PDF.js opens every PDF with one plain `GET` (it only switches to byte ranges for files larger than twice its chunk size, and a downloader's `GET` is identical to the viewer's), so refusing or chunk-capping the request breaks the viewer. Instead the response **body is paced**: each student has a token bucket (`worker/limits.js` `pace`, used by `paceBody` in `worker/index.js`) and every PDF byte flows through it at `MAX_PDF_MBPS` (default: `MAX_MBPS`, 12 Mbit/s) with a 5-second burst, so the first pages still paint but a whole file — or a script — cannot finish instantly. Admins are exempt. Verified with new `worker/security.test.mjs` tests (the pure pacer allows a burst then charges the rest at the rate; a 520 KB body at 0.8 Mbps provably waits ≥150 ms and arrives intact) — `npm test` 40/40, plus `typecheck` and `build`.
+
 ### Added (file manager)
 - **Admin → Course files now lists sections that exist only as YouTube lessons.** The list is built from R2 keys, so a section whose only content is a YouTube lesson — like `ক্লাস করার নিয়ম` (one YouTube video, no uploaded files) — was invisible to the admin even though students saw it in the course. The listing now derives those folders from the lesson ids (`childDirsFromIds` in `worker/files.js`) and shows them at their saved position, so the file view and the student course view agree. A real R2 folder of the same name still wins any clash.
 

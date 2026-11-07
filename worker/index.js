@@ -1,5 +1,5 @@
 import { handleFiles } from './files.js';
-import { lessonOf, hourBucket, publicLesson } from './limits.js';
+import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
 import { sessionKey, scramble } from './yt-cipher.mjs';
 import { YOUTUBE_LESSONS } from './youtube.js';
 
@@ -445,7 +445,51 @@ function reserve(env, u, bytes) {
   return wait;
 }
 
+// A video request is at most CHUNK bytes and the player makes many, so delaying each request
+// caps the total. A PDF cannot use that trick: PDF.js opens every PDF with one plain GET (it
+// only switches to byte ranges for files larger than twice its chunk size, and its first
+// request — and a downloader's — both carry no Range at all), so refusing or chunk-capping the
+// request would break the viewer. Instead the body is paced: each student has a token bucket
+// and a single response pays for its bytes in wall-clock time. `MAX_PDF_MBPS` tunes it
+// (default: the video cap).
+const pdfBuckets = new Map();
+function paceBody(env, u, body) {
+  if (!body || u.is_admin) return body;
+  const rate = Math.max(1, Number(env.MAX_PDF_MBPS ?? env.MAX_MBPS ?? 12) * 125000); // bytes/sec
+  const burst = rate * 5; // about five seconds of bytes flow at once, so first pages still paint
+  let s = pdfBuckets.get(u.id);
+  if (!s) { if (pdfBuckets.size > 2000) pdfBuckets.clear(); s = { tokens: burst, at: Date.now() }; pdfBuckets.set(u.id, s); }
+  const source = typeof body.getReader === 'function' ? body : new ReadableStream({ start(c) { c.enqueue(body); c.close(); } });
+  const reader = source.getReader();
+  const SLICE = 256 * 1024; // pace in small pieces, so a big R2 chunk is not stuck behind one long wait
+  let pending = null;
+  let offset = 0;
+  return new ReadableStream({
+    async pull(c) {
+      if (!pending) {
+        const { done, value } = await reader.read();
+        if (done) return void c.close();
+        if (!value.byteLength) return; // an empty chunk; the next pull reads again
+        pending = value;
+        offset = 0;
+      }
+      const size = Math.min(SLICE, pending.byteLength - offset);
+      const bytes = pending.subarray(offset, offset + size);
+      offset += size;
+      if (offset >= pending.byteLength) pending = null;
+      const now = Date.now();
+      const step = pace(s.tokens, { rate, burst, bytes: size, elapsedMs: now - s.at });
+      s.tokens = step.tokens;
+      s.at = now + step.waitMs;
+      if (step.waitMs > 0) await new Promise((r) => setTimeout(r, step.waitMs));
+      c.enqueue(bytes);
+    },
+    cancel(reason) { return reader.cancel(reason); },
+  });
+}
+
 async function serve(req, env, key, u) {
+  const isPdf = /\.pdf$/i.test(key);
   const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
   if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
   if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
@@ -476,12 +520,14 @@ async function serve(req, env, key, u) {
     h.set('content-length', String(length));
     status = 206;
   } else h.set('content-length', String(obj.size));
-  if (!/\.pdf$/i.test(key)) {
+  // Videos (and other media) are throttled by delaying each range request. PDFs skip that
+  // (a whole file would 429 at the request cap) and are paced by the body instead.
+  if (!isPdf) {
     const wait = reserve(env, u, Number(h.get('content-length')) || 0);
     if (wait === null) return json({ error: 'Too fast. Please slow down.' }, 429, { 'retry-after': '30' });
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
-  return new Response(obj.body, { status, headers: h });
+  return new Response(isPdf ? paceBody(env, u, obj.body) : obj.body, { status, headers: h });
 }
 
 const SEC_HEADERS = {
