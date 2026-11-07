@@ -326,9 +326,6 @@ button.lr-link:hover:not(:disabled){background:transparent;text-decoration:under
 button.lr-open{padding:0;background:none;text-align:left;color:var(--link);font-weight:500;min-height:0;display:inline}
 button.lr-open:hover:not(:disabled){background:none;text-decoration:underline}
 .lr-viewer{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;background:var(--bg)}
-.lr-viewer-top{display:flex;align-items:center;gap:.5rem;padding:.35rem .6rem;border-bottom:1px solid var(--border);background:var(--surface)}
-.lr-viewer-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.lr-viewer-close{flex:none}
 .lr-viewer>app-pdf-viewer{flex:1;min-height:0;height:auto}
 .lr-viewer-loading{align-items:center;justify-content:center;gap:.6rem;color:var(--muted)}
 

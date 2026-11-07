@@ -92,11 +92,24 @@ import { NotesControls } from './notes-controls';
       @if (opened(); as r) {
         @defer (on immediate) {
           <div class="lr-viewer" role="dialog" aria-modal="true" [attr.aria-label]="r.title">
-            <header class="lr-viewer-top">
-              <span class="lr-viewer-title">{{ r.title }}</span>
+            <!-- The exact lesson bar a PDF lesson shows (see course.ts), so a resource reads
+                 identically to a lesson: Back closes the modal, and the lesson's own controls
+                 stay in reach. -->
+            <div class="player-bar">
+              <button #backBtn type="button" class="back-btn" aria-label="Back" title="Back" (click)="close()">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+                <span class="lbl">Back</span>
+              </button>
+              <span class="player-title">{{ r.title }}</span>
               @if (pdfViewer(); as pv) { <app-notes-controls [viewer]="pv" /> }
-              <button #closeBtn type="button" class="lr-viewer-close" aria-label="Close PDF" (click)="close()">Close</button>
-            </header>
+              <button class="done-btn" [class.p]="!lesson().done" [class.is-done]="lesson().done"
+                [attr.aria-pressed]="lesson().done"
+                [attr.aria-label]="lesson().done ? 'Completed' : 'Mark as complete'"
+                [title]="lesson().done ? 'Completed' : 'Mark as complete'" (click)="toggleDone()">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
+                <span class="lbl">{{ lesson().done ? 'Completed' : 'Mark as complete' }}</span>
+              </button>
+            </div>
             <app-pdf-viewer [key]="r.url" />
           </div>
         } @placeholder {
@@ -129,11 +142,13 @@ export class LessonResources {
   /** The viewer inside the modal, so its header can render the shared notes controls. */
   protected readonly pdfViewer = viewChild(PdfViewer);
   private readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
-  private readonly closeBtn = viewChild<ElementRef<HTMLButtonElement>>('closeBtn');
+  private readonly backBtn = viewChild<ElementRef<HTMLButtonElement>>('backBtn');
   private readonly destroyRef = inject(DestroyRef);
   private lastFocus: HTMLElement | null = null;
   private currentId = '';
   private seq = 0;
+  /** Media that was playing when the modal opened, so it resumes when the modal closes. */
+  private paused: HTMLMediaElement[] = [];
 
   constructor() {
     effect(() => {
@@ -155,9 +170,9 @@ export class LessonResources {
       });
     });
 
-    // Focus the close button when the deferred modal has rendered.
+    // Focus the Back button when the deferred modal has rendered.
     effect(() => {
-      if (this.opened() && this.closeBtn()) this.closeBtn()!.nativeElement.focus();
+      if (this.opened() && this.backBtn()) this.backBtn()!.nativeElement.focus();
     });
 
     // Escape closes the modal; the viewer's own Escape handler only acts when expanded.
@@ -168,6 +183,7 @@ export class LessonResources {
     this.destroyRef.onDestroy(() => {
       document.removeEventListener('keydown', esc);
       document.body.style.overflow = '';
+      this.paused = []; // the lesson (and its media) is being torn down too; nothing to resume
     });
   }
 
@@ -193,13 +209,47 @@ export class LessonResources {
     this.lastFocus = document.activeElement as HTMLElement | null;
     this.opened.set(r);
     document.body.style.overflow = 'hidden';
+    this.pauseBackground();
   }
 
   protected close(): void {
     this.opened.set(null);
     document.body.style.overflow = '';
+    this.resumeBackground();
     this.lastFocus?.focus();
     this.lastFocus = null;
+  }
+
+  /** Marks the lesson this resource belongs to as complete, exactly like the lesson bar. */
+  protected toggleDone(): void {
+    const l = this.lesson();
+    void this.api.setDone(l.id, !l.done);
+  }
+
+  /**
+   * The modal is a visual overlay, so the lesson's own player keeps playing underneath it.
+   * Pause whatever is playing when a resource opens, and remember it so `resumeBackground`
+   * can bring it back when the modal closes. Covers the native `<video>`, `<hlsjs-video>`
+   * and `<youtube-video>` elements, which all expose the standard `pause()`/`paused` pair.
+   */
+  private pauseBackground(): void {
+    this.paused = [];
+    for (const el of document.querySelectorAll<HTMLMediaElement>('video, hlsjs-video, youtube-video')) {
+      if (el.paused === false && typeof el.pause === 'function') {
+        el.pause();
+        this.paused.push(el);
+      }
+    }
+  }
+
+  private resumeBackground(): void {
+    for (const el of this.paused) {
+      try {
+        const p = el.play?.();
+        if (p && typeof p.catch === 'function') p.catch(() => { /* autoplay blocked: leave it paused */ });
+      } catch { /* element was detached */ }
+    }
+    this.paused = [];
   }
 
   protected async load(key = this.lesson().id): Promise<void> {

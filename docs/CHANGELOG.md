@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Changed (resource PDF)
+- **A resource PDF now looks exactly like a PDF lesson.** The resource modal had its own one-off header (`.lr-viewer-top` with a `.lr-viewer-title` and a plain *Close* button), so it read differently from a PDF lesson — same reader, different chrome. It now renders the lesson bar verbatim (`course.ts`): the same single `← Back` control (which closes the modal), the same `.player-title`, the same shared `app-notes-controls`, and the same **Mark as complete** button wired to the lesson via `Api.setDone` — so marking a lesson complete from inside a resource PDF behaves exactly like doing it from the lesson bar. The dead `.lr-viewer-top` / `.lr-viewer-title` / `.lr-viewer-close` rules were removed from `styles.css`.
+
+### Fixed (lesson keeps playing under a resource PDF)
+- **Opening a resource PDF no longer leaves the lesson video playing behind the modal.** The resource modal is a full-screen overlay, not a route change, so the lesson's player kept playing underneath it. `open()` now pauses whatever is playing (`video`, `hlsjs-video`, `youtube-video` — all expose the standard `pause()`/`paused` pair) and remembers the elements; `close()` resumes exactly those. `npm test` 51/51, `typecheck`, `build`, `check:scripts`.
+
 ### Changed (lesson bar)
 - **The lesson bar now has one Back button instead of a Back/Forward pair.** The browser-style ←/→ pair took the width of two controls and Forward was almost always disabled (the app rarely leaves forward history), so it read as clutter in the video, YouTube and PDF lesson bars. `app-nav-buttons` became `app-back-button` — a single `← Back` control that only ever moves through the app's own history and greys out at the start of it. On phones the label is dropped (like *Mark as complete*) so a PDF lesson keeps its width; the arrow stays 40 px for touch. The unused forward tracking (`furthest`, `canForward`, `forward()`) was removed from `NavHistory`. `npm test` 51/51, `typecheck`, `build`.
 - **The options hamburger (`app-options-menu`) is gone from the lesson bar.** The viewer is navigation-only now — Back plus the lesson's own controls — so students no longer see a `⋮`/`☰` menu there. The single options menu remains in the main header (the course list / folder browser) and in the two admin screens, where the header is hidden and it is the only route to *Admin panel* / *Back to course*, *Dark mode* and *Sign out*.
