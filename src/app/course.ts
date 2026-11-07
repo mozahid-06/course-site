@@ -7,7 +7,6 @@ import { YtPlayer } from './yt-player';
 import { PdfViewer } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
-import { OptionsMenu } from './options-menu';
 import { NotesControls } from './notes-controls';
 import { BackButton } from './back-button';
 import { statusMark, type StatusMark } from './lesson-status';
@@ -18,7 +17,7 @@ type View = CourseView;
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu, NotesControls, BackButton],
+  imports: [Player, YtPlayer, PdfViewer, LessonPanel, NotesControls, BackButton],
   template: `
     <div class="layout">
 
@@ -104,8 +103,6 @@ type View = CourseView;
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
                 <span class="lbl">{{ l.done ? 'Completed' : 'Mark as complete' }}</span>
               </button>
-
-              <app-options-menu />
             </div>
             <div class="player-body" data-scroll-top>
               @if (l.kind === 'pdf') {
