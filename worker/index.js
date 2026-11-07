@@ -58,6 +58,15 @@ async function startSession(env, u, secure) {
 function clearCookie(secure) {
   return `s=; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=0`;
 }
+// Google sign-in nonce: the page asks /api/config for one, passes it to Google, and Google
+// echoes it in the ID token. The same value rides in this HttpOnly, same-site cookie, so a
+// token minted for another site (login CSRF) cannot be replayed here: the attacker cannot
+// read the cookie to learn the nonce. The check itself is the pure, testable nonceOk().
+const nonceOf = (req) => /(?:^|; )gn=([^;]+)/.exec(req.headers.get('cookie') || '')?.[1] || '';
+export function nonceOk(claim, cookie) {
+  return !!cookie && !!claim && safeEq(String(claim), cookie);
+}
+const nonceCookie = (nonce, secure) => `gn=${nonce}; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=43200`;
 
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, sid TEXT)',
@@ -515,7 +524,10 @@ const handle = async (req, env) => {
     const m = req.method;
     try {
       await ensureSchema(env);
-      if (path === '/api/config') return json({ googleClientId: env.GOOGLE_CLIENT_ID || '' });
+      if (path === '/api/config') {
+        const nonce = b64(crypto.getRandomValues(new Uint8Array(16)));
+        return json({ googleClientId: env.GOOGLE_CLIENT_ID || '', nonce }, 200, { 'set-cookie': nonceCookie(nonce, secure) });
+      }
       if (path === '/api/login/google' && m === 'POST') {
         if (!env.GOOGLE_CLIENT_ID) return json({ error: 'Google sign-in is not set up' }, 503);
         const ip = ['i:' + ipOf(req), 40];
@@ -523,6 +535,8 @@ const handle = async (req, env) => {
         const { credential } = await req.json();
         const c = await verifyGoogle(String(credential || ''), env).catch(() => null);
         if (!c) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
+        // The token must carry the nonce this browser was issued, or it was minted elsewhere.
+        if (!nonceOk(c.nonce, nonceOf(req))) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
         let u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE google_sub = ?').bind(c.sub).first();
         if (!u) {
           u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE email = ?').bind(c.email.toLowerCase()).first();

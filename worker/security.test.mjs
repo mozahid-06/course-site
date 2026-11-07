@@ -2,7 +2,7 @@
 // fake D1 (node:sqlite) and a fake R2, so the checks that matter live in code, not in prose.
 import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { invalidateCourse } from './index.js';
+import worker, { invalidateCourse, nonceOk } from './index.js';
 import { db, r2, hashPw } from './harness.mjs';
 // The client decoder is the contract for the scrambled payload, so the test decodes the
 // real response with the real client code rather than a copy of the algorithm.
@@ -74,6 +74,19 @@ test('API responses carry HSTS (includeSubDomains) and are not cacheable', async
   const res = await call('/api/config');
   assert.equal(res.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
   assert.equal(res.headers.get('cache-control'), 'no-store');
+});
+
+test('Google sign-in binds the token to a nonce the page got from /api/config', async () => {
+  const res = await call('/api/config');
+  const body = await res.json();
+  assert.ok(typeof body.nonce === 'string' && body.nonce.length >= 16, 'config returns a nonce');
+  assert.ok((res.headers.get('set-cookie') || '').startsWith('gn=' + body.nonce + ';'), 'the nonce is also set as a cookie');
+  assert.ok((res.headers.get('set-cookie') || '').includes('SameSite=Strict'), 'the nonce cookie is same-site');
+  // The callback must echo exactly the nonce the page was given.
+  assert.equal(nonceOk(body.nonce, body.nonce), true);
+  assert.equal(nonceOk('other-nonce-value', body.nonce), false);
+  assert.equal(nonceOk(undefined, body.nonce), false);
+  assert.equal(nonceOk(body.nonce, ''), false);
 });
 
 test('a malformed percent-escape in a path is a 400, not a 500', async () => {

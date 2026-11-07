@@ -17,6 +17,7 @@ export interface DirEntry { name: string; path: string; position?: number | null
 export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean; position?: number | null }
 export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[]; order: Record<string, number> }
 export interface UploadPart { partNumber: number; etag: string; size?: number }
+export interface GoogleConfig { googleClientId: string; nonce?: string }
 
 /** A failed API call that still knows its HTTP status, which the uploader needs. */
 export class ApiError extends Error {
@@ -32,8 +33,8 @@ export class Api {
   readonly order = signal<Record<string, number>>({});
 
   /** Public config, fetched once. Kept so the login form does not wait on a second call. */
-  private configReq?: Promise<{ googleClientId: string }>;
-  private googleCfg?: { googleClientId: string };
+  private configReq?: Promise<GoogleConfig>;
+  private googleCfg?: GoogleConfig;
 
   /** Drop the local session after the server rejects it (another device signed in). */
   private signOutLocal(): void {
@@ -84,7 +85,7 @@ export class Api {
     // Ask for the public config alongside the session check, so the login form already
     // has the Google client id the moment it mounts and its button can render with the
     // email/password fields instead of a moment later.
-    this.configReq ??= this.req<{ googleClientId: string }>('config').catch(() => ({ googleClientId: '' }));
+    this.configReq ??= this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
     try {
       this.me.set(await this.req<Me>('me'));
       this.courses.set(await this.req<CourseData[]>('course'));
@@ -105,13 +106,21 @@ export class Api {
     await this.init();
   }
 
-  /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
-  async googleClientId(): Promise<string> {
+  /**
+   * Google sign-in config from the server: the OAuth client id and the per-page sign-in
+   * nonce the callback must echo. Empty client id means Google sign-in is not configured.
+   */
+  async googleConfig(): Promise<GoogleConfig> {
     if (!this.googleCfg) {
-      this.configReq ??= this.req<{ googleClientId: string }>('config').catch(() => ({ googleClientId: '' }));
+      this.configReq ??= this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
       this.googleCfg = await this.configReq;
     }
-    return this.googleCfg.googleClientId;
+    return this.googleCfg;
+  }
+
+  /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
+  async googleClientId(): Promise<string> {
+    return (await this.googleConfig()).googleClientId;
   }
 
   async loginGoogle(credential: string): Promise<void> {
