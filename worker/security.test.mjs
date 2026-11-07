@@ -222,6 +222,47 @@ test('media: the per-hour distinct-lesson limit answers 429', async () => {
   assert.equal((await call('/api/media/Course/lesson-21.pdf', { headers })).status, 429);
 });
 
+test('media: repeating one lesson does not consume the per-hour distinct quota', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const headers = browser(cookie);
+  // An HLS burst is one lesson fetched many times; it must count once, not fifty times.
+  for (let i = 0; i < 50; i++) {
+    assert.notEqual((await call('/api/media/Course/repeat.pdf', { headers })).status, 429, `repeat ${i}`);
+  }
+  for (let i = 0; i < 19; i++) {
+    assert.notEqual((await call(`/api/media/Course/extra-${i}.pdf`, { headers })).status, 429, `extra ${i}`);
+  }
+  assert.equal((await call('/api/media/Course/extra-21.pdf', { headers })).status, 429, 'the 21st distinct lesson');
+});
+
+test('media: a repeat request for the same lesson does not touch D1 for the hit counter', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const headers = browser(cookie);
+  await call('/api/media/Course/notes.pdf', { headers }); // records this lesson for the hour
+  env.DB.stats.reset();
+  await call('/api/media/Course/notes.pdf', { headers });
+  // The session and enrollment reads still happen (they are security checks), but the
+  // lesson-hit INSERT and COUNT must not: an HLS burst would otherwise double D1 traffic.
+  assert.ok(env.DB.stats.roundTrips <= 2, 'repeat used ' + env.DB.stats.roundTrips + ' D1 round trips');
+});
+
+test('a cold course listing reads its three metadata tables in one batched round trip', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  await call('/api/course', { headers: { cookie } }); // warm the schema memo and the course cache
+  invalidateCourse();
+  env.DB.stats.reset();
+  const res = await call('/api/course', { headers: { cookie } });
+  assert.equal(res.status, 200);
+  assert.ok(env.DB.stats.batches >= 1, 'metadata reads go through a batch');
+  assert.ok(env.DB.stats.batchedStatements >= 3, 'all three reads share the batch, got ' + env.DB.stats.batchedStatements);
+});
+
 test('/api/progress only accepts a real lesson in a course the student has', async () => {
   const email = await addUser();
   await enroll(email, 'Course');

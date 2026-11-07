@@ -263,9 +263,16 @@ async function listCourse(env) {
     secs.get(sectionName).push(lesson);
   }
 
+  // Three independent metadata reads share one D1 round trip. A full course build happens
+  // once per cold Worker instance, so collapsing these calls matters more than it looks.
+  const [ytRows, posRows, descRows] = await env.DB.batch([
+    env.DB.prepare('SELECT id, yt FROM youtube_lessons'),
+    env.DB.prepare('SELECT path, position FROM content_order'),
+    env.DB.prepare('SELECT course, description FROM course_meta'),
+  ]);
   // YouTube lessons managed from the Admin panel (D1). The id is a path like an R2
   // key (<Course>/<Folder>/<Name>); the first segment is the course.
-  for (const row of (await env.DB.prepare('SELECT id, yt FROM youtube_lessons').all()).results) {
+  for (const row of ytRows.results) {
     const parts = String(row.id).split('/').map((s) => s.trim()).filter(Boolean);
     if (parts.length < 2 || !row.yt) continue;
     const id = parts.join('/');
@@ -279,11 +286,11 @@ async function listCourse(env) {
   }
 
   const positions = new Map(
-    (await env.DB.prepare('SELECT path, position FROM content_order').all()).results
+    posRows.results
       .map((r) => [String(r.path), Number(r.position)]),
   );
   const descriptions = new Map(
-    (await env.DB.prepare('SELECT course, description FROM course_meta').all()).results
+    descRows.results
       .map((r) => [String(r.course), String(r.description ?? '')]),
   );
   // Numbered items come first, in their saved order; unnumbered ones keep the default
@@ -368,17 +375,39 @@ function mediaRequestOk(req, env) {
 //    per hour in D1, so the count is shared by every Worker instance. (The old in-memory
 //    Map lived in one isolate, so a scrape spread across isolates could dodge it.)
 const lessonLimit = (env) => Number(env.MAX_LESSONS_PER_HOUR || 20);
+// A plain media request — and every HLS segment is one — must not cost a D1 write and read
+// each time. Within one Worker instance, remember which (user, hour, lesson) hits we already
+// recorded and the count we last read, so a segment burst collapses to near-zero D1 traffic.
+// Both memos are advisory: D1 stays the source of truth across instances, so the cap can be
+// lax by at most COUNT_TTL_MS on another instance, never bypassed for long.
+const hitMemo = new Set();
+const countMemo = new Map();
+const COUNT_TTL = 3000;
 async function scraping(env, u, key) {
   if (u.is_admin) return false;
   const hour = hourBucket(Date.now());
-  // INSERT OR IGNORE only writes a row when this lesson is new for the hour, so the D1
-  // write volume tracks lessons opened, not media requests (HLS emits one per segment).
-  await env.DB.prepare('INSERT OR IGNORE INTO lesson_hits (user_id, hour, lesson) VALUES (?, ?, ?)').bind(u.id, hour, lessonOf(key)).run();
-  const row = await env.DB.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND hour = ?').bind(u.id, hour).first();
-  // Dead hour buckets are removed opportunistically (about one request in fifty) so no
-  // scheduled job is needed and the table stays small on the free plan.
-  if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM lesson_hits WHERE hour < ?').bind(hour - 1).run();
-  return Number(row && row.c) > lessonLimit(env);
+  const lesson = lessonOf(key);
+  const hitKey = `${u.id}|${hour}|${lesson}`;
+  const countKey = `${u.id}|${hour}`;
+  if (!hitMemo.has(hitKey)) {
+    // INSERT OR IGNORE only writes a row when this lesson is new for the hour. Skipping the
+    // statement when this instance already recorded it removes one D1 write per HLS segment.
+    await env.DB.prepare('INSERT OR IGNORE INTO lesson_hits (user_id, hour, lesson) VALUES (?, ?, ?)').bind(u.id, hour, lesson).run();
+    if (hitMemo.size > 5000) hitMemo.clear();
+    hitMemo.add(hitKey);
+    countMemo.delete(countKey); // a new distinct lesson may have moved the count
+  }
+  let seen = countMemo.get(countKey);
+  if (!seen || Date.now() - seen.at > COUNT_TTL) {
+    const row = await env.DB.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND hour = ?').bind(u.id, hour).first();
+    seen = { n: Number(row && row.c), at: Date.now() };
+    if (countMemo.size > 2000) countMemo.clear();
+    countMemo.set(countKey, seen);
+    // Dead hour buckets are removed opportunistically (about one request in fifty) so no
+    // scheduled job is needed and the table stays small on the free plan.
+    if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM lesson_hits WHERE hour < ?').bind(hour - 1).run();
+  }
+  return seen.n > lessonLimit(env);
 }
 
 // 3) Slow-down: video must be requested in ranges (browsers always do; a plain "download this URL" gets refused),
