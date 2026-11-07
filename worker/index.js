@@ -1,5 +1,6 @@
 import { handleFiles } from './files.js';
-import { lessonOf, hourBucket, publicLesson } from './limits.js';
+import { lessonOf, hourBucket, publicLesson, pace } from './limits.js';
+import { sessionKey, scramble } from './yt-cipher.mjs';
 import { YOUTUBE_LESSONS } from './youtube.js';
 
 const enc = new TextEncoder();
@@ -57,11 +58,27 @@ async function startSession(env, u, secure) {
 function clearCookie(secure) {
   return `s=; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=0`;
 }
+// Google sign-in nonce: the page asks /api/config for one, passes it to Google, and Google
+// echoes it in the ID token. The same value rides in this HttpOnly, same-site cookie, so a
+// token minted for another site (login CSRF) cannot be replayed here: the attacker cannot
+// read the cookie to learn the nonce. The check itself is the pure, testable nonceOk().
+const nonceOf = (req) => /(?:^|; )gn=([^;]+)/.exec(req.headers.get('cookie') || '')?.[1] || '';
+export function nonceOk(claim, cookie) {
+  return !!cookie && !!claim && safeEq(String(claim), cookie);
+}
+const nonceCookie = (nonce, secure) => `gn=${nonce}; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict; Path=/; Max-Age=43200`;
 
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, sid TEXT)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
+  // Images pasted into a PDF are far too big for a D1 row (2 MB hard cap), so only the bytes
+  // go to R2, under a private `_notes/<user>/<sha256>` key; this table remembers which assets
+  // a student's per-lesson notes reference, and their content type, so they can be served
+  // back and swept when the notes, the lesson or the student go away.
+  'CREATE TABLE IF NOT EXISTS note_assets (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, asset_id TEXT NOT NULL, type TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (user_id, lesson, asset_id))',
+  'CREATE INDEX IF NOT EXISTS idx_note_assets_lesson ON note_assets(lesson)',
+  'CREATE INDEX IF NOT EXISTS idx_note_assets_user ON note_assets(user_id, asset_id)',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
   // Distinct lessons a student opened in one hour bucket. In D1 so every Worker instance
   // shares the count; a row is written only when a lesson is new for that hour.
@@ -104,16 +121,19 @@ async function seedAdmin(env) {
   }
 }
 async function migrate(env) {
-  const has = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'google_sub'").first();
-  if (!has.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
-  const hasVer = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'ver'").first();
-  if (!hasVer.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
-  const hasSid = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('users') WHERE name = 'sid'").first();
-  if (!hasSid.c) await env.DB.prepare('ALTER TABLE users ADD COLUMN sid TEXT').run();
-  const hasResKind = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'kind'").first();
-  if (!hasResKind.c) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
-  const hasResFile = await env.DB.prepare("SELECT COUNT(*) c FROM pragma_table_info('resources') WHERE name = 'file_key'").first();
-  if (!hasResFile.c) await env.DB.prepare('ALTER TABLE resources ADD COLUMN file_key TEXT').run();
+  // One round trip for every column check: five separate pragma reads cost five times the
+  // D1 latency on a cold isolate, which is noticeable when the database is far away.
+  const [usersCols, resCols] = await env.DB.batch([
+    env.DB.prepare("SELECT name FROM pragma_table_info('users')"),
+    env.DB.prepare("SELECT name FROM pragma_table_info('resources')"),
+  ]);
+  const userHas = new Set((usersCols.results || []).map((r) => r.name));
+  const resHas = new Set((resCols.results || []).map((r) => r.name));
+  if (!userHas.has('google_sub')) await env.DB.prepare('ALTER TABLE users ADD COLUMN google_sub TEXT').run();
+  if (!userHas.has('ver')) await env.DB.prepare('ALTER TABLE users ADD COLUMN ver INTEGER NOT NULL DEFAULT 0').run();
+  if (!userHas.has('sid')) await env.DB.prepare('ALTER TABLE users ADD COLUMN sid TEXT').run();
+  if (!resHas.has('kind')) await env.DB.prepare("ALTER TABLE resources ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'").run();
+  if (!resHas.has('file_key')) await env.DB.prepare('ALTER TABLE resources ADD COLUMN file_key TEXT').run();
   await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)').run();
   // YouTube lessons are managed from the Admin panel. Created here (before listCourse runs
   // below) and seeded once from worker/youtube.js, so the hadYt guard makes a later delete
@@ -137,7 +157,92 @@ async function migrate(env) {
     for (let i = 0; i < st.length; i += 50) await env.DB.batch(st.slice(i, i + 50));
   }
 }
-const ensureSchema = (env) => (ready ||= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)).catch((e) => { ready = null; throw e; }));
+const SCHEMA_DEADLINE_MS = 8000;
+// A D1 binding call has no timeout of its own, so one stalled call used to leave this
+// promise pending forever. Because it is cached, every later request in the same isolate
+// awaited the dead promise and hung too — a single stall took the Worker down until the
+// next deploy. Race it against a deadline so the request fails fast and the cache resets.
+function withDeadline(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const e = new Error('Database temporarily unavailable');
+      e.dbTimeout = true;
+      reject(e);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// The schema gate has its own deadline (above), but every later query in a request is a
+// fresh D1 call with no timeout of its own: a single stalled one hung the request — and a
+// client that never times out — forever. This wrapper races every query against the same
+// deadline, so a stall answers 503 instead of pinning the connection. It is transparent:
+// `prepare().bind(...).first()/all()/run()/raw()` resolve to the real value, and `batch`
+// gets the original statement objects back so workerd's own binding checks still pass.
+const DB_DEADLINE_MS = 8000;
+const RAW_STMT = Symbol('rawStatement');
+const QUERY_TERMINALS = new Set(['first', 'all', 'run', 'raw']);
+
+function guardStatement(stmt, ms) {
+  return new Proxy(stmt, {
+    get(target, prop, receiver) {
+      if (prop === RAW_STMT) return target;
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function') return value;
+      if (prop === 'bind') return (...args) => guardStatement(value.apply(target, args), ms);
+      if (QUERY_TERMINALS.has(prop)) return (...args) => withDeadline(value.apply(target, args), ms);
+      return value.bind(target);
+    },
+  });
+}
+
+const guardedDbCache = new WeakMap();
+export function guardDb(DB, ms = DB_DEADLINE_MS) {
+  if (!DB || typeof DB.prepare !== 'function') return DB;
+  let guarded = guardedDbCache.get(DB);
+  if (!guarded) {
+    const target = DB;
+    guarded = new Proxy(target, {
+      get(db, prop, receiver) {
+        if (prop === 'prepare') return (query) => guardStatement(target.prepare(query), ms);
+        // Unwrap the guarded statements so the real binding gets real D1PreparedStatements.
+        if (prop === 'batch') return (stmts) => withDeadline(target.batch(stmts.map((s) => (s && s[RAW_STMT]) || s)), ms);
+        if (prop === 'exec') return (query) => withDeadline(target.exec(query), ms);
+        const value = Reflect.get(db, prop, receiver);
+        return typeof value === 'function' ? value.bind(db) : value;
+      },
+    });
+    guardedDbCache.set(DB, guarded);
+  }
+  return guarded;
+}
+
+/** Route a request's env through the per-query deadline so no D1 call can hang it. */
+export function guardEnv(env) {
+  return new Proxy(env, {
+    get(target, prop, receiver) {
+      if (prop === 'DB') return guardDb(target.DB);
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+export function ensureSchema(env, deadlineMs = SCHEMA_DEADLINE_MS) {
+  if (!ready) {
+    const run = withDeadline(
+      env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).then(() => migrate(env)).then(() => seedAdmin(env)),
+      deadlineMs,
+    );
+    // The abandoned promise cannot be cancelled; dropping it from the cache is what
+    // matters, so the next request retries cleanly (the schema statements are idempotent).
+    const guarded = run.catch((e) => {
+      if (ready === guarded) ready = undefined;
+      throw e;
+    });
+    ready = guarded;
+  }
+  return ready;
+}
 
 // ---- Google sign-in: verify the ID token (RS256 JWT) against Google's public keys ----
 let jwks = { at: 0, keys: [] };
@@ -169,6 +274,18 @@ const unusablePw = async () => '!';
 const isOwner = (env, email) => !!env.ADMIN_EMAIL && email === String(env.ADMIN_EMAIL).trim().toLowerCase();
 const validEmail = (e) => typeof e === 'string' && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 const validPw = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
+// Comments show a stable, non-identifying handle rather than the account's email: on a small
+// course the local part of an address is easy to guess from, so it must not appear in a public
+// thread. The handle is derived from the account id, so it is the same everywhere and never
+// changes, but carries no personal information.
+const HANDLE_ADJ = ['Bright', 'Calm', 'Cheerful', 'Clever', 'Curious', 'Eager', 'Gentle', 'Happy', 'Kind', 'Lively', 'Merry', 'Noble', 'Patient', 'Quick', 'Quiet', 'Sharp', 'Steady', 'Sunny', 'Swift', 'Warm', 'Wise', 'Brave', 'Bold', 'Cosmic', 'Daring', 'Honest', 'Humble', 'Jolly', 'Keen', 'Lucky', 'Mellow', 'Neat', 'Polite', 'Proud', 'Vivid'];
+const HANDLE_ANIMAL = ['Badger', 'Bear', 'Beaver', 'Bison', 'Bobcat', 'Cheetah', 'Crane', 'Deer', 'Dolphin', 'Eagle', 'Falcon', 'Finch', 'Fox', 'Gecko', 'Goose', 'Heron', 'Ibis', 'Jaguar', 'Koala', 'Lemur', 'Lynx', 'Marten', 'Moose', 'Newt', 'Otter', 'Owl', 'Panda', 'Parrot', 'Puma', 'Raven', 'Robin', 'Salmon', 'Seal', 'Sparrow', 'Stork', 'Swan', 'Tiger', 'Turtle', 'Wolf', 'Wren', 'Yak', 'Zebra'];
+function displayName(id) {
+  let h = 2166136261;
+  for (const ch of String(id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  h >>>= 0;
+  return HANDLE_ADJ[h % HANDLE_ADJ.length] + ' ' + HANDLE_ANIMAL[(h >>> 8) % HANDLE_ANIMAL.length];
+}
 
 // Bucket structure:
 //   <Course>/<file>                  → course with a flat lesson
@@ -211,6 +328,7 @@ async function listCourse(env) {
   // files directly under course root go into section '' (no section)
   const courses = new Map();
   for (const key of keys) {
+    if (key === '_notes' || key.startsWith('_notes/')) continue; // reserved: private note images
     // A course is a top-level folder. Register it for any nested key, so a folder that
     // holds only its `.keep` placeholder (a brand-new, empty course) is listed too.
     const slash = key.indexOf('/');
@@ -241,9 +359,16 @@ async function listCourse(env) {
     secs.get(sectionName).push(lesson);
   }
 
+  // Three independent metadata reads share one D1 round trip. A full course build happens
+  // once per cold Worker instance, so collapsing these calls matters more than it looks.
+  const [ytRows, posRows, descRows] = await env.DB.batch([
+    env.DB.prepare('SELECT id, yt FROM youtube_lessons'),
+    env.DB.prepare('SELECT path, position FROM content_order'),
+    env.DB.prepare('SELECT course, description FROM course_meta'),
+  ]);
   // YouTube lessons managed from the Admin panel (D1). The id is a path like an R2
   // key (<Course>/<Folder>/<Name>); the first segment is the course.
-  for (const row of (await env.DB.prepare('SELECT id, yt FROM youtube_lessons').all()).results) {
+  for (const row of ytRows.results) {
     const parts = String(row.id).split('/').map((s) => s.trim()).filter(Boolean);
     if (parts.length < 2 || !row.yt) continue;
     const id = parts.join('/');
@@ -257,11 +382,11 @@ async function listCourse(env) {
   }
 
   const positions = new Map(
-    (await env.DB.prepare('SELECT path, position FROM content_order').all()).results
+    posRows.results
       .map((r) => [String(r.path), Number(r.position)]),
   );
   const descriptions = new Map(
-    (await env.DB.prepare('SELECT course, description FROM course_meta').all()).results
+    descRows.results
       .map((r) => [String(r.course), String(r.description ?? '')]),
   );
   // Numbered items come first, in their saved order; unnumbered ones keep the default
@@ -346,17 +471,39 @@ function mediaRequestOk(req, env) {
 //    per hour in D1, so the count is shared by every Worker instance. (The old in-memory
 //    Map lived in one isolate, so a scrape spread across isolates could dodge it.)
 const lessonLimit = (env) => Number(env.MAX_LESSONS_PER_HOUR || 20);
+// A plain media request — and every HLS segment is one — must not cost a D1 write and read
+// each time. Within one Worker instance, remember which (user, hour, lesson) hits we already
+// recorded and the count we last read, so a segment burst collapses to near-zero D1 traffic.
+// Both memos are advisory: D1 stays the source of truth across instances, so the cap can be
+// lax by at most COUNT_TTL_MS on another instance, never bypassed for long.
+const hitMemo = new Set();
+const countMemo = new Map();
+const COUNT_TTL = 3000;
 async function scraping(env, u, key) {
   if (u.is_admin) return false;
   const hour = hourBucket(Date.now());
-  // INSERT OR IGNORE only writes a row when this lesson is new for the hour, so the D1
-  // write volume tracks lessons opened, not media requests (HLS emits one per segment).
-  await env.DB.prepare('INSERT OR IGNORE INTO lesson_hits (user_id, hour, lesson) VALUES (?, ?, ?)').bind(u.id, hour, lessonOf(key)).run();
-  const row = await env.DB.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND hour = ?').bind(u.id, hour).first();
-  // Dead hour buckets are removed opportunistically (about one request in fifty) so no
-  // scheduled job is needed and the table stays small on the free plan.
-  if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM lesson_hits WHERE hour < ?').bind(hour - 1).run();
-  return Number(row && row.c) > lessonLimit(env);
+  const lesson = lessonOf(key);
+  const hitKey = `${u.id}|${hour}|${lesson}`;
+  const countKey = `${u.id}|${hour}`;
+  if (!hitMemo.has(hitKey)) {
+    // INSERT OR IGNORE only writes a row when this lesson is new for the hour. Skipping the
+    // statement when this instance already recorded it removes one D1 write per HLS segment.
+    await env.DB.prepare('INSERT OR IGNORE INTO lesson_hits (user_id, hour, lesson) VALUES (?, ?, ?)').bind(u.id, hour, lesson).run();
+    if (hitMemo.size > 5000) hitMemo.clear();
+    hitMemo.add(hitKey);
+    countMemo.delete(countKey); // a new distinct lesson may have moved the count
+  }
+  let seen = countMemo.get(countKey);
+  if (!seen || Date.now() - seen.at > COUNT_TTL) {
+    const row = await env.DB.prepare('SELECT COUNT(*) c FROM lesson_hits WHERE user_id = ? AND hour = ?').bind(u.id, hour).first();
+    seen = { n: Number(row && row.c), at: Date.now() };
+    if (countMemo.size > 2000) countMemo.clear();
+    countMemo.set(countKey, seen);
+    // Dead hour buckets are removed opportunistically (about one request in fifty) so no
+    // scheduled job is needed and the table stays small on the free plan.
+    if (Math.random() < 0.02) await env.DB.prepare('DELETE FROM lesson_hits WHERE hour < ?').bind(hour - 1).run();
+  }
+  return seen.n > lessonLimit(env);
 }
 
 // 3) Slow-down: video must be requested in ranges (browsers always do; a plain "download this URL" gets refused),
@@ -365,6 +512,19 @@ async function scraping(env, u, key) {
 const CHUNK = 4 * 1024 * 1024;
 const VIDEO_FILE = /\.(mp4|webm|mkv|mov|avi|m4v)$/i;
 const buckets = new Map();
+// Only a single, well-formed byte range is served: "bytes=start-end" (end optional)
+// with end >= start. Anything else — a suffix "-N", a multi-range, junk — is refused
+// with 416 instead of being handed to R2, which would ignore it and return the whole
+// object, dodging both the chunk cap and the speed limiter. start may be large; when
+// it (or the end) is not a finite number the range is refused rather than mis-computed.
+function videoRange(header) {
+  const m = /^bytes=(\d+)-(\d*)$/.exec(String(header).trim());
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = m[2] === '' ? Infinity : Number(m[2]);
+  if (!Number.isFinite(start) || Number.isNaN(end) || end < start) return null;
+  return { offset: start, length: Math.min(end - start + 1, CHUNK) };
+}
 function reserve(env, u, bytes) {
   if (u.is_admin) return 0;
   const rate = Number(env.MAX_MBPS || 12) * 125000; // bytes per second
@@ -381,20 +541,111 @@ function reserve(env, u, bytes) {
   return wait;
 }
 
+// A video request is at most CHUNK bytes and the player makes many, so delaying each request
+// caps the total. A PDF cannot use that trick: PDF.js opens every PDF with one plain GET (it
+// only switches to byte ranges for files larger than twice its chunk size, and its first
+// request — and a downloader's — both carry no Range at all), so refusing or chunk-capping the
+// request would break the viewer. Instead the body is paced: each student has a token bucket
+// and a single response pays for its bytes in wall-clock time. `MAX_PDF_MBPS` tunes it
+// (default: the video cap).
+const pdfBuckets = new Map();
+function paceBody(env, u, body) {
+  if (!body || u.is_admin) return body;
+  const rate = Math.max(1, Number(env.MAX_PDF_MBPS ?? env.MAX_MBPS ?? 12) * 125000); // bytes/sec
+  const burst = rate * 5; // about five seconds of bytes flow at once, so first pages still paint
+  let s = pdfBuckets.get(u.id);
+  if (!s) { if (pdfBuckets.size > 2000) pdfBuckets.clear(); s = { tokens: burst, at: Date.now() }; pdfBuckets.set(u.id, s); }
+  const source = typeof body.getReader === 'function' ? body : new ReadableStream({ start(c) { c.enqueue(body); c.close(); } });
+  const reader = source.getReader();
+  const SLICE = 256 * 1024; // pace in small pieces, so a big R2 chunk is not stuck behind one long wait
+  let pending = null;
+  let offset = 0;
+  return new ReadableStream({
+    async pull(c) {
+      if (!pending) {
+        const { done, value } = await reader.read();
+        if (done) return void c.close();
+        if (!value.byteLength) return; // an empty chunk; the next pull reads again
+        pending = value;
+        offset = 0;
+      }
+      const size = Math.min(SLICE, pending.byteLength - offset);
+      const bytes = pending.subarray(offset, offset + size);
+      offset += size;
+      if (offset >= pending.byteLength) pending = null;
+      const now = Date.now();
+      const step = pace(s.tokens, { rate, burst, bytes: size, elapsedMs: now - s.at });
+      s.tokens = step.tokens;
+      s.at = now + step.waitMs;
+      if (step.waitMs > 0) await new Promise((r) => setTimeout(r, step.waitMs));
+      c.enqueue(bytes);
+    },
+    cancel(reason) { return reader.cancel(reason); },
+  });
+}
+
+// ---- PDF note images (stored in R2, referenced from the notes JSON by URL) ----
+const NOTE_ASSET_MAX = 16 * 1024 * 1024; // one image; above this the browser must not inline it
+const NOTE_ASSETS_PER_USER = 500; // a generous ceiling so one account cannot fill the bucket
+// Exactly the image types PDF.js accepts for a stamp; anything else is refused.
+const NOTE_ASSET_TYPES = new Set(['image/apng', 'image/avif', 'image/bmp', 'image/gif', 'image/jpeg', 'image/png', 'image/svg+xml', 'image/webp', 'image/x-icon']);
+const ASSET_ID_RE = /^[a-f0-9]{64}$/; // sha-256 hex, computed by the browser
+const noteAssetKey = (userId, assetId) => `_notes/${userId}/${assetId}`;
+const noteAssetUrl = (lesson, assetId) => `/api/note-asset/${encodeURIComponent(lesson)}/${assetId}`;
+
+/** The asset ids a notes payload references, read from each note's bitmapUrl. */
+function referencedAssetIds(notes) {
+  const ids = new Set();
+  for (const note of notes) {
+    const url = note && typeof note === 'object' ? note.bitmapUrl : null;
+    if (typeof url !== 'string') continue;
+    const last = url.split('?')[0].split('#')[0].split('/').pop() || '';
+    if (ASSET_ID_RE.test(last)) ids.add(last);
+  }
+  return ids;
+}
+
+/**
+ * Delete note_assets rows for (user, lesson) that `keep` does not name, then remove the R2
+ * object of each dropped asset that no other lesson of that user still needs. With no keep,
+ * every asset for that lesson is dropped (notes deleted, or the lesson deleted).
+ */
+async function pruneNoteAssets(env, userId, lesson, keep = new Set()) {
+  const rows = (await env.DB.prepare('SELECT asset_id FROM note_assets WHERE user_id = ? AND lesson = ?').bind(userId, lesson).all()).results || [];
+  const drop = rows.map((r) => String(r.asset_id)).filter((id) => !keep.has(id));
+  if (!drop.length) return;
+  await env.DB.batch(drop.map((id) => env.DB.prepare('DELETE FROM note_assets WHERE user_id = ? AND lesson = ? AND asset_id = ?').bind(userId, lesson, id)));
+  const keys = [];
+  for (const id of drop) {
+    const still = await env.DB.prepare('SELECT 1 x FROM note_assets WHERE user_id = ? AND asset_id = ? LIMIT 1').bind(userId, id).first();
+    if (!still) keys.push(noteAssetKey(userId, id));
+  }
+  if (keys.length) await env.RESOURCES.delete([...new Set(keys)]);
+}
+
+/** Remove every R2 object under a prefix (a deleted user's `_notes/<id>/` folder). */
+async function sweepPrefix(env, prefix) {
+  let cursor;
+  do {
+    const r = await env.RESOURCES.list({ prefix, cursor, limit: 1000 });
+    const keys = (r.objects || []).map((o) => o.key);
+    if (keys.length) await env.RESOURCES.delete(keys);
+    cursor = r.truncated ? r.cursor : undefined;
+  } while (cursor);
+}
+
 async function serve(req, env, key, u) {
+  const isPdf = /\.pdf$/i.test(key);
   const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
   if (!ok || !mediaRequestOk(req, env)) return json({ error: 'Not allowed' }, 403);
   if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
   const isVideo = VIDEO_FILE.test(key);
   let range = req.headers;
   if (isVideo) {
-    const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.get('range') || '');
     if (!req.headers.has('range')) return json({ error: 'Not allowed' }, 403);
-    if (m) {
-      const start = Number(m[1]);
-      const end = m[2] === '' ? Infinity : Number(m[2]);
-      range = { offset: start, length: Math.min(end - start + 1, CHUNK) };
-    }
+    const spec = videoRange(req.headers.get('range'));
+    if (!spec) return json({ error: 'Range not satisfiable' }, 416);
+    range = spec;
   }
   const obj = await env.RESOURCES.get(key, { range });
   if (!obj) return json({ error: 'File not found' }, 404);
@@ -415,12 +666,14 @@ async function serve(req, env, key, u) {
     h.set('content-length', String(length));
     status = 206;
   } else h.set('content-length', String(obj.size));
-  if (!/\.pdf$/i.test(key)) {
+  // Videos (and other media) are throttled by delaying each range request. PDFs skip that
+  // (a whole file would 429 at the request cap) and are paced by the body instead.
+  if (!isPdf) {
     const wait = reserve(env, u, Number(h.get('content-length')) || 0);
     if (wait === null) return json({ error: 'Too fast. Please slow down.' }, 429, { 'retry-after': '30' });
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
-  return new Response(obj.body, { status, headers: h });
+  return new Response(isPdf ? paceBody(env, u, obj.body) : obj.body, { status, headers: h });
 }
 
 const SEC_HEADERS = {
@@ -449,7 +702,7 @@ export default {
         return json({ error: 'Forbidden' }, 403);
       }
     }
-    const res = await handle(req, env);
+    const res = await handle(req, guardEnv(env));
     for (const [k, v] of Object.entries(SEC_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
     if (!res.headers.has('cache-control')) res.headers.set('cache-control', 'no-store');
     return res;
@@ -461,9 +714,19 @@ const handle = async (req, env) => {
     const { pathname: path, protocol } = new URL(req.url);
     const secure = protocol === 'https:';
     const m = req.method;
+    // Sign-in config only mints a nonce and reads an env var, so keep it off the database
+    // path: the login screen (and the Google button) still render when D1 is unavailable.
+    if (path === '/api/config') {
+      // Reuse the nonce this browser already holds. Rotating it on every call breaks a page
+      // that is mid sign-in (a second tab, or a form left open past the 12h cookie life),
+      // because the callback would echo a nonce the cookie no longer matches. The value is
+      // still unguessable and HttpOnly, so replay stays bound to this browser.
+      const existing = nonceOf(req);
+      const nonce = /^[A-Za-z0-9_-]{16,}$/.test(existing) ? existing : b64(crypto.getRandomValues(new Uint8Array(16)));
+      return json({ googleClientId: env.GOOGLE_CLIENT_ID || '', nonce }, 200, { 'set-cookie': nonceCookie(nonce, secure) });
+    }
     try {
       await ensureSchema(env);
-      if (path === '/api/config') return json({ googleClientId: env.GOOGLE_CLIENT_ID || '' });
       if (path === '/api/login/google' && m === 'POST') {
         if (!env.GOOGLE_CLIENT_ID) return json({ error: 'Google sign-in is not set up' }, 503);
         const ip = ['i:' + ipOf(req), 40];
@@ -471,6 +734,8 @@ const handle = async (req, env) => {
         const { credential } = await req.json();
         const c = await verifyGoogle(String(credential || ''), env).catch(() => null);
         if (!c) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
+        // The token must carry the nonce this browser was issued, or it was minted elsewhere.
+        if (!nonceOk(c.nonce, nonceOf(req))) { await noteFail(env, [ip]); return json({ error: 'Google sign-in failed' }, 401); }
         let u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE google_sub = ?').bind(c.sub).first();
         if (!u) {
           u = await env.DB.prepare('SELECT id, email, google_sub, ver FROM users WHERE email = ?').bind(c.email.toLowerCase()).first();
@@ -483,7 +748,11 @@ const handle = async (req, env) => {
       if (path === '/api/login' && m === 'POST') {
         const { email, password } = await req.json();
         const em = String(email || '').trim().toLowerCase();
-        const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40]];
+        // Three counters: a tight one per email+IP (a single machine guessing one account), a
+        // looser per-IP one (one machine guessing many accounts), and a per-email one so a
+        // guess spread across many IPs still slows down. The per-email cap is high enough that
+        // only a real attack reaches it, and it expires with the same 15-minute window.
+        const keys = [['ei:' + em + '|' + ipOf(req), 8], ['i:' + ipOf(req), 40], ['e:' + em, 30]];
         if (await locked(env, keys)) return tooMany();
         const pass = String(password || '');
         const u = await env.DB.prepare('SELECT id, pass, ver FROM users WHERE email = ?').bind(em).first();
@@ -501,7 +770,7 @@ const handle = async (req, env) => {
       const u = await getUser(req, env);
       if (!u) return json({ error: 'Not logged in' }, 401);
 
-      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin });
+      if (path === '/api/me') return json({ id: u.id, email: u.email, is_admin: u.is_admin, name: displayName(u.id), ytKey: await sessionKey(env.SESSION_SECRET, u.id, u.sid) });
       // "Sign out everywhere": bump the session version so every cookie minted before now
       // fails getUser, then clear this device's cookie too. Available to any user (admins
       // included) as the least disruptive alternative to forcing single-device login on admins.
@@ -540,7 +809,7 @@ const handle = async (req, env) => {
         const lesson = course && course.sections.flatMap((s) => s.lessons).find((l) => l.id === key);
         if (!lesson || lesson.kind !== 'youtube' || !lesson.yt) return json({ error: 'Not found' }, 404);
         if (await scraping(env, u, key)) return json({ error: 'Too many lessons opened. Please slow down.' }, 429);
-        return json({ yt: lesson.yt }, 200, { 'cache-control': 'no-store' });
+        return json({ yt: scramble(await sessionKey(env.SESSION_SECRET, u.id, u.sid), lesson.yt) }, 200, { 'cache-control': 'no-store' });
       }
       // Position numbers the student browser shows: path -> number. A course-level row
       // is public (so the catalog sorts the same for everyone); a lesson-level row is
@@ -563,12 +832,64 @@ const handle = async (req, env) => {
         if (mine && !mine.has(courseOf(key))) return json({ error: 'Not allowed' }, 403);
         return serve(req, env, key, u);
       }
+      if (path.startsWith('/api/note-asset/')) {
+        // Private images pasted into a PDF's notes. The bytes live in R2 under this user's
+        // `_notes/` prefix and only the signed-in student may read or write their own.
+        const rest = path.slice('/api/note-asset/'.length);
+        const cut = rest.lastIndexOf('/');
+        const lesson = cut > 0 ? decodeURIComponent(rest.slice(0, cut)) : '';
+        const assetId = cut > 0 ? rest.slice(cut + 1) : '';
+        if (!ASSET_ID_RE.test(assetId)) return json({ error: 'Bad request' }, 400);
+        if (lesson.length > 500 || !/\.pdf$/i.test(lesson)) return json({ error: 'Bad lesson' }, 400);
+        const mineA = await myCourses(env, u);
+        if (mineA && !mineA.has(courseOf(lesson))) return json({ error: 'Not allowed' }, 403);
+        const realA = await env.DB.prepare('SELECT 1 x FROM resources WHERE file_key = ?').bind(lesson).first();
+        if (!realA && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
+        if (m === 'PUT') {
+          const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+          if (!NOTE_ASSET_TYPES.has(type)) return json({ error: 'That is not an image we can store' }, 415);
+          const body = new Uint8Array(await req.arrayBuffer());
+          if (!body.length) return json({ error: 'Empty image' }, 400);
+          if (body.length > NOTE_ASSET_MAX) return json({ error: 'That image is too large to store' }, 413);
+          const exists = await env.DB.prepare('SELECT 1 x FROM note_assets WHERE user_id = ? AND asset_id = ? LIMIT 1').bind(u.id, assetId).first();
+          if (!exists) {
+            const n = await env.DB.prepare('SELECT COUNT(*) n FROM note_assets WHERE user_id = ?').bind(u.id).first();
+            if (n && Number(n.n) >= NOTE_ASSETS_PER_USER) return json({ error: 'You have too many stored images on this PDF' }, 413);
+          }
+          await env.RESOURCES.put(noteAssetKey(u.id, assetId), body, { httpMetadata: { contentType: type } });
+          await env.DB.prepare(
+            'INSERT INTO note_assets (user_id, lesson, asset_id, type, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, lesson, asset_id) DO UPDATE SET type = excluded.type',
+          ).bind(u.id, lesson, assetId, type, Date.now()).run();
+          return json({ url: noteAssetUrl(lesson, assetId) });
+        }
+        if (m === 'GET') {
+          const row = await env.DB.prepare('SELECT type FROM note_assets WHERE user_id = ? AND lesson = ? AND asset_id = ?').bind(u.id, lesson, assetId).first();
+          if (!row) return json({ error: 'Not found' }, 404);
+          const obj = await env.RESOURCES.get(noteAssetKey(u.id, assetId));
+          if (!obj) return json({ error: 'Not found' }, 404);
+          return new Response(obj.body, {
+            status: 200,
+            headers: {
+              'content-type': row.type || 'application/octet-stream',
+              'x-content-type-options': 'nosniff',
+              // An image is data, never a document: sandbox it in case an SVG slips through.
+              'content-security-policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+              'cache-control': 'private, max-age=31536000, immutable',
+            },
+          });
+        }
+        return json({ error: 'Not found' }, 404);
+      }
       if (path.startsWith('/api/notes/')) {
         // Private PDF notes: every query is scoped to the signed-in user, so nobody can read another student's notes.
         const lesson = decodeURIComponent(path.slice(11));
         if (lesson.length > 500 || !/\.pdf$/i.test(lesson)) return json({ error: 'Bad lesson' }, 400);
         const mineN = await myCourses(env, u);
         if (mineN && !mineN.has(courseOf(lesson))) return json({ error: 'Not allowed' }, 403);
+        // Notes are only meaningful for a PDF that exists: a lesson in the bucket, or an
+        // admin-uploaded resource. This keeps a student from inventing names to fill D1.
+        const realFile = await env.DB.prepare('SELECT 1 x FROM resources WHERE file_key = ?').bind(lesson).first();
+        if (!realFile && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
         if (m === 'GET') {
           const r = await env.DB.prepare('SELECT data FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).first();
           return json({ data: r ? JSON.parse(r.data) : [] });
@@ -577,13 +898,19 @@ const handle = async (req, env) => {
           const { data } = await req.json();
           if (!Array.isArray(data)) return json({ error: 'Bad notes' }, 400);
           const text = JSON.stringify(data);
-          if (text.length > 1500000) return json({ error: 'Your notes on this PDF are too large to save' }, 413);
+          // Measure bytes, not characters: D1 stores UTF-8 bytes, so a short multi-byte
+          // string (e.g. Bengali, 3 bytes per character) could otherwise be saved past
+          // the limit and then fail at the storage layer.
+          if (enc.encode(text).length > 1500000) return json({ error: 'Your notes on this PDF are too large to save' }, 413);
           if (!data.length) await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
           else await env.DB.prepare('INSERT INTO pdf_notes (user_id, lesson, data, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, lesson) DO UPDATE SET data = excluded.data, updated = excluded.updated').bind(u.id, lesson, text, Date.now()).run();
+          // An image the student removed (or replaced) no longer belongs in the bucket.
+          await pruneNoteAssets(env, u.id, lesson, referencedAssetIds(data));
           return json({ ok: true });
         }
         if (m === 'DELETE') {
           await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
+          await pruneNoteAssets(env, u.id, lesson);
           return json({ ok: true });
         }
       }
@@ -602,13 +929,13 @@ const handle = async (req, env) => {
         const access = await lessonAccess(env, u, key);
         if (access !== 'ok') return accessError(access);
         if (m === 'GET') {
-          const rows = (await env.DB.prepare('SELECT c.id, c.parent_id, c.body, c.created, c.user_id, u.email FROM comments c JOIN users u ON u.id = c.user_id WHERE c.lesson = ? ORDER BY c.created DESC LIMIT 500').bind(key).all()).results;
+          const rows = (await env.DB.prepare('SELECT c.id, c.parent_id, c.body, c.created, c.user_id FROM comments c WHERE c.lesson = ? ORDER BY c.created DESC LIMIT 500').bind(key).all()).results;
           const likes = (await env.DB.prepare('SELECT comment_id, COUNT(*) n FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE lesson = ?) GROUP BY comment_id').bind(key).all()).results;
           const mine = new Set((await env.DB.prepare('SELECT cl.comment_id id FROM comment_likes cl JOIN comments c ON c.id = cl.comment_id WHERE c.lesson = ? AND cl.user_id = ?').bind(key, u.id).all()).results.map((r) => r.id));
           const count = new Map(likes.map((r) => [r.comment_id, r.n]));
           return json({
             comments: rows.map((r) => {
-              const name = String(r.email || '?').split('@')[0] || '?';
+              const name = displayName(r.user_id);
               return {
                 id: r.id, parent_id: r.parent_id, body: r.body, created: r.created,
                 name, initial: name[0].toUpperCase(),
@@ -633,7 +960,7 @@ const handle = async (req, env) => {
           if (recent.n >= 10) return json({ error: 'You are commenting too fast. Try again in a few minutes.' }, 429);
           const now = Date.now();
           const res = await env.DB.prepare('INSERT INTO comments (lesson, user_id, parent_id, body, created) VALUES (?, ?, ?, ?, ?)').bind(key, u.id, parent, body, now).run();
-          const name = u.email.split('@')[0];
+          const name = displayName(u.id);
           return json({ comment: { id: res.meta.last_row_id, parent_id: parent, body, created: now, name, initial: name[0].toUpperCase(), likes: 0, liked: false, own: true, can_delete: true } });
         }
       }
@@ -893,6 +1220,7 @@ const handle = async (req, env) => {
             await env.DB.batch([
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM note_assets WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM video_notes WHERE user_id = ?').bind(id),
               // Their top-level comments take other students' replies with them, the same
               // way deleting a comment does, so no invisible orphan replies are left behind.
@@ -904,6 +1232,8 @@ const handle = async (req, env) => {
               env.DB.prepare('DELETE FROM enrollments WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
             ]);
+            // Their pasted note images live under `_notes/<id>/`; take the folder with them.
+            await sweepPrefix(env, `_notes/${id}/`).catch(() => {});
             return json({ ok: true });
           }
         }
@@ -912,6 +1242,10 @@ const handle = async (req, env) => {
       }
       return json({ error: 'Not found' }, 404);
     } catch (e) {
+      // A path with a stray "%" (e.g. /api/media/%zz) makes decodeURIComponent throw. That is a
+      // bad request, not a server fault, so it must not surface as a 500.
+      if (e instanceof URIError) return json({ error: 'Bad request' }, 400);
+      if (e && e.dbTimeout) return json({ error: 'Database temporarily unavailable' }, 503, { 'retry-after': '5' });
       const dup = String(e).includes('UNIQUE');
       return json({ error: dup ? 'That email already exists' : 'Server error' }, dup ? 409 : 500);
     }

@@ -5,8 +5,8 @@ import { Theme } from './theme';
 
 /**
  * The single options menu shared by the header, the lesson bar and the admin shell.
- * One `⋮` opens Admin panel / Back to course (admins only), the two-way theme
- * switch, and Sign out.
+ * One `⋮` opens Admin panel / Back to course and Sign out everywhere (admins only),
+ * the two-way theme switch, and Sign out.
  */
 @Component({
   selector: 'app-options-menu',
@@ -39,10 +39,15 @@ import { Theme } from './theme';
           Dark mode
           <span class="switch" [class.on]="theme.dark()" aria-hidden="true"></span>
         </button>
-        <button type="button" role="menuitem" (click)="signOutEverywhere()">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="10" rx="1.5" /><path d="M7 19h5" /><path d="M9 15v4" /><path d="m17 9 4 3-4 3" /><path d="M21 12h-6" /></svg>
-          Sign out everywhere
-        </button>
+        <!-- Admins can hold several live sessions, so ending them all is theirs to do.
+             A student has one live session at a time (a new login displaces the old
+             device), so "Sign out" is already the whole story for them. -->
+        @if (isAdmin()) {
+          <button type="button" role="menuitem" (click)="signOutEverywhere()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="10" rx="1.5" /><path d="M7 19h5" /><path d="M9 15v4" /><path d="m17 9 4 3-4 3" /><path d="M21 12h-6" /></svg>
+            Sign out everywhere
+          </button>
+        }
         <button type="button" role="menuitem" (click)="signOut()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v16h-6" /><path d="m10 8-4 4 4 4" /><path d="M6 12h10" /></svg>
           Sign out

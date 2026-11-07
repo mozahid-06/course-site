@@ -140,7 +140,9 @@ export class Discussion {
     for (const list of map.values()) list.sort((a, b) => a.created - b.created);
     return map;
   });
-  protected readonly myInitial = computed(() => (this.api.me()?.email?.[0] ?? '?').toUpperCase());
+  // Matches the handle the server shows for this account, not the email (which the thread
+  // never exposes), so the composer's avatar agrees with the posted comment.
+  protected readonly myInitial = computed(() => ((this.api.me()?.name ?? this.api.me()?.email ?? '?')[0] ?? '?').toUpperCase());
 
   constructor() {
     effect(() => {

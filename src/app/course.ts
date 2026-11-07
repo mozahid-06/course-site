@@ -1,22 +1,23 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, viewChild } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Api, CourseData, Lesson } from './api';
 import { Player } from './player';
 import { YtPlayer } from './yt-player';
 import { PdfViewer } from './pdf-viewer';
 import { LessonSearch } from './lesson-search';
 import { LessonPanel } from './lesson-panel';
-import { Shell } from './shell';
-import { OptionsMenu } from './options-menu';
 import { NotesControls } from './notes-controls';
+import { BackButton } from './back-button';
+import { statusMark, type StatusMark } from './lesson-status';
+import { courseUrl, folderUrl, lessonUrl, parseCourseTail, type CourseView } from './course-route';
 
-type View =
-  | { kind: 'browser'; courseTitle: string; path: string[] }
-  | { kind: 'player'; lesson: Lesson; courseTitle: string; path: string[] };
+type View = CourseView;
 
 @Component({
   selector: 'app-course',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [Player, YtPlayer, PdfViewer, LessonPanel, OptionsMenu, NotesControls],
+  imports: [Player, YtPlayer, PdfViewer, LessonPanel, NotesControls, BackButton],
   template: `
     <div class="layout">
 
@@ -29,7 +30,7 @@ type View =
             <nav class="breadcrumb" aria-label="Location">
               <button class="bc-btn" (click)="home()">Courses</button>
               <span class="bc-sep">/</span>
-              <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.courseTitle }}</button>
+              <button class="bc-btn" (click)="goToBreadcrumb(-1)">{{ v.course }}</button>
               @for (seg of v.path; track $index; let i = $index) {
                 <span class="bc-sep">/</span>
                 <button class="bc-btn" (click)="goToBreadcrumb(i)">{{ seg }}</button>
@@ -43,6 +44,15 @@ type View =
           <!-- File browser -->
           @if (v.kind === 'browser') {
             <div class="browser">
+              <svg class="fb-defs" aria-hidden="true">
+                <defs>
+                  <mask id="fb-check-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+                    <rect width="24" height="24" fill="#fff" />
+                    <path d="m7 12.6 3.2 3.2L17 8" fill="none" stroke="#000" stroke-width="2.4"
+                      stroke-linecap="round" stroke-linejoin="round" />
+                  </mask>
+                </defs>
+              </svg>
               @for (item of browserItems(); track item.id) {
                 <button class="fb-item" (click)="onItemClick(item)">
                   <span class="fb-pos" aria-hidden="true">{{ item.index }}</span>
@@ -58,8 +68,16 @@ type View =
                     }
                   </span>
                   <span class="fb-name">{{ item.name }}</span>
-                  @if (item.kind !== 'folder' && item.done) {
-                    <span class="fb-done" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg></span>
+                  @if (item.mark !== 'none') {
+                    <span class="fb-done" [class.is-done]="item.mark === 'done'" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        @if (item.mark === 'done') {
+                          <circle class="disc" cx="12" cy="12" r="10" mask="url(#fb-check-cut)" />
+                        } @else {
+                          <circle class="ring" cx="12" cy="12" r="10" />
+                        }
+                      </svg>
+                    </span>
                   }
                 </button>
               } @empty {
@@ -71,10 +89,7 @@ type View =
           <!-- Player / PDF viewer -->
           @if (v.kind === 'player' && lesson(); as l) {
             <div class="player-bar">
-              <button class="back-btn" aria-label="Back" (click)="backToBrowser()">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
-                <span class="lbl">Back</span>
-              </button>
+              <app-back-button />
               <span class="player-title">{{ l.title }}</span>
 
               <!-- PDF: the notes controls are the same shared component the resource modal uses. -->
@@ -88,8 +103,6 @@ type View =
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" /></svg>
                 <span class="lbl">{{ l.done ? 'Completed' : 'Mark as complete' }}</span>
               </button>
-
-              <app-options-menu />
             </div>
             <div class="player-body" data-scroll-top>
               @if (l.kind === 'pdf') {
@@ -159,11 +172,13 @@ type View =
 export class Course {
   protected readonly api = inject(Api);
   protected readonly search = inject(LessonSearch);
-  private readonly shell = inject(Shell);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+
+  /** The route is the source of truth: `/course/<course>[/folder|/lesson/...]`. */
+  private readonly params = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
 
   constructor() {
-    // The header is hidden on the lesson player, so tell the shell when a lesson opens.
-    effect(() => { this.shell.lessonOpen.set(this.view()?.kind === 'player'); });
     // Clear a stale query from the header, but keep a pending search request: this
     // component is deferred, so the header is interactive while its chunk loads and
     // a result clicked in that window must still be honoured.
@@ -180,33 +195,30 @@ export class Course {
       this.search.request.set(null);
       const course = this.api.courses().find((c) => c.title === req.course);
       if (!course || course.locked) return;
-      this.activeCourseTitle.set(course.title);
       this.search.query.set('');
       this.search.expanded.set(false);
-      if (req.lesson) {
-        const lesson = course.sections.flatMap((sec) => sec.lessons).find((l) => l.id === req.lesson);
-        if (!lesson) return;
-        this.view.set({ kind: 'player', lesson, courseTitle: course.title, path: req.path });
-        return;
-      }
-      this.view.set({ kind: 'browser', courseTitle: course.title, path: [] });
+      const lesson = req.lesson && course.sections.flatMap((s) => s.lessons).find((l) => l.id === req.lesson);
+      void this.router.navigate(lesson ? lessonUrl(course.title, lesson.id) : folderUrl(course.title, req.path));
     });
   }
 
-  protected home(): void { this.view.set(null); this.activeCourseTitle.set(null); this.search.reset(); }
+  /** What the route says is on screen; null means the course list. */
+  protected readonly view = computed<View | null>(() => {
+    const course = this.params().get('course');
+    return course ? parseCourseTail(course, this.params().get('tail') ?? '') : null;
+  });
 
-  protected readonly view = signal<View | null>(null);
   /** The lesson's PDF viewer, so the lesson bar can drive its notes controls. */
   protected readonly pdfViewer = viewChild(PdfViewer);
-  private readonly activeCourseTitle = signal<string | null>(null);
+
   /**
    * The open course, always read live from Api state. Holding the `CourseData`
    * object itself goes stale, because `Api.setDone` replaces course objects
    * immutably — the file list would then miss the "completed" checkmark.
    */
   protected readonly activeCourse = computed<CourseData | null>(() => {
-    const title = this.activeCourseTitle();
-    return title ? this.api.courses().find((c) => c.title === title) ?? null : null;
+    const course = this.params().get('course');
+    return course ? this.api.courses().find((c) => c.title === course) ?? null : null;
   });
 
   // Courses in the admin's order first, then the rest alphabetically. The server already
@@ -233,7 +245,7 @@ export class Course {
     const currentPath = v.path; // e.g. [] = course root, ['Section'] = inside section
     const here = [course.title, ...currentPath].join('/');
 
-    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'youtube' | 'folder'; done: boolean };
+    type Row = { id: string; path: string; name: string; kind: 'video' | 'pdf' | 'youtube' | 'folder'; done: boolean; mark: StatusMark };
     // A folder shows up in every section below it, so key the rows by path to keep one.
     const rows = new Map<string, Row>();
 
@@ -250,13 +262,13 @@ export class Course {
       if (depth === 0) {
         // Files directly at this level
         for (const l of section.lessons) {
-          rows.set(l.id, { id: l.id, path: l.id, name: l.title, kind: l.kind, done: l.done });
+          rows.set(l.id, { id: l.id, path: l.id, name: l.title, kind: l.kind, done: l.done, mark: statusMark(l.kind, l.done) });
         }
       } else if (depth > 0) {
         // Next folder level
         const name = sectionParts[currentPath.length];
         const path = `${here}/${name}`;
-        rows.set(path, { id: 'folder:' + name, path, name, kind: 'folder', done: false });
+        rows.set(path, { id: 'folder:' + name, path, name, kind: 'folder', done: false, mark: 'none' });
       }
     }
 
@@ -280,30 +292,24 @@ export class Course {
     return sorted.map((row, i) => ({ ...row, index: i + 1 }));
   });
 
+  protected home(): void { this.search.reset(); void this.router.navigateByUrl('/'); }
+
   protected openCourse(c: CourseData): void {
     if (c.locked) return;
-    this.activeCourseTitle.set(c.title);
     this.search.query.set('');
     this.search.expanded.set(false);
-    this.view.set({ kind: 'browser', courseTitle: c.title, path: [] });
+    void this.router.navigate(courseUrl(c.title));
   }
 
-  protected onItemClick(item: { id: string; name: string; kind: string; done: boolean }): void {
+  protected onItemClick(item: { id: string; name: string; kind: string }): void {
     const v = this.view();
     if (!v || v.kind !== 'browser') return;
 
     if (item.kind === 'folder') {
-      this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: [...v.path, item.name] });
+      void this.router.navigate(folderUrl(v.course, [...v.path, item.name]));
     } else {
-      // Find the full lesson object
-      const lesson = this.api.courses()
-        .flatMap((c) => c.sections)
-        .flatMap((s) => s.lessons)
-        .find((l) => l.id === item.id);
-      if (lesson) {
-        this.search.expanded.set(false);
-        this.view.set({ kind: 'player', lesson, courseTitle: v.courseTitle, path: v.path });
-      }
+      this.search.expanded.set(false);
+      void this.router.navigate(lessonUrl(v.course, item.id));
     }
   }
 
@@ -311,22 +317,14 @@ export class Course {
     const v = this.view();
     if (!v || v.kind !== 'browser') return;
     // index -1 = course root, 0 = first segment, etc.
-    this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: v.path.slice(0, index + 1) });
-  }
-
-  protected backToBrowser(): void {
-    const v = this.view();
-    if (v?.kind === 'player') {
-      this.search.expanded.set(false);
-      this.view.set({ kind: 'browser', courseTitle: v.courseTitle, path: v.path });
-    }
+    void this.router.navigate(folderUrl(v.course, v.path.slice(0, index + 1)));
   }
 
   /** Always the live lesson from app state, so "done" updates immediately. */
   protected readonly lesson = computed(() => {
     const v = this.view();
     if (!v || v.kind !== 'player') return null;
-    return this.api.courses().flatMap((c) => c.sections).flatMap((x) => x.lessons).find((x) => x.id === v.lesson.id) ?? v.lesson;
+    return this.api.courses().flatMap((c) => c.sections).flatMap((x) => x.lessons).find((x) => x.id === v.lessonId) ?? null;
   });
 
   protected courseTotal(c: CourseData): number {

@@ -5,11 +5,16 @@ compatibility_date = "2026-10-01"
 [assets]
 directory = "./dist/web/browser"
 run_worker_first = ["/api/*"]
+# Deep links (/course/..., /admin) are handled by the Angular router, so any
+# unknown path must serve the app rather than a 404.
+not_found_handling = "single-page-application"
 
-# No IDs on purpose: Cloudflare creates these on the first deploy
+# Created deliberately in APAC: the default location (WNAM) put the primary on the
+# other side of the Pacific from the Worker in Dhaka, so every D1 round trip cost
+# ~270 ms. No IDs on purpose: each account resolves this name to its own database.
 [[d1_databases]]
 binding = "DB"
-database_name = "course-db"
+database_name = "course-db-apac"
 
 [[r2_buckets]]
 binding = "RESOURCES"

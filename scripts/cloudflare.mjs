@@ -62,7 +62,49 @@ export function readConfig() {
 }
 
 /**
+ * A gitignored file that maps a git branch to the Cloudflare account it deploys to,
+ * e.g. `{ "main": { "id": "...", "name": "closed-source" }, "dev": "..." }`.
+ * Keeping it out of git means the account ids never ship with the repo.
+ */
+export const LOCAL_ACCOUNTS_FILE = join(root, '.cloudflare-accounts.json');
+
+/** The branch this checkout is on, or null when not a repo or detached HEAD. */
+export function currentBranch(env = process.env) {
+  const result = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) return null;
+  const branch = (result.stdout ?? '').trim();
+  return branch && branch !== 'HEAD' ? branch : null;
+}
+
+/** Read the branch -> account map, tolerating a string id or an `{ id, name }` object. */
+export function localAccountMap(env = process.env) {
+  const file = env.CLOUDFLARE_ACCOUNTS_FILE || LOCAL_ACCOUNTS_FILE;
+  if (!existsSync(file)) return {};
+  let data;
+  try {
+    data = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read ${file}: ${error.message}`);
+  }
+  if (!data || typeof data !== 'object') return {};
+  const map = {};
+  for (const [branch, value] of Object.entries(data)) {
+    if (branch.startsWith('_')) continue; // allow a "_comment" key
+    const id = typeof value === 'string' ? value : value?.id;
+    if (typeof id === 'string' && id.trim()) {
+      map[branch] = { id: id.trim(), name: typeof value === 'object' ? value.name : undefined };
+    }
+  }
+  return map;
+}
+
+/**
  * The account Wrangler deploys to. CLOUDFLARE_ACCOUNT_ID wins (that is what CI uses);
+ * otherwise the branch -> account map in `.cloudflare-accounts.json` picks the account;
  * otherwise ask Wrangler, which reflects the current login even when its old on-disk
  * account cache still points somewhere else.
  */
@@ -70,6 +112,14 @@ export function resolveAccount(env = process.env) {
   if (env.CLOUDFLARE_ACCOUNT_ID) {
     return { id: env.CLOUDFLARE_ACCOUNT_ID, name: 'from CLOUDFLARE_ACCOUNT_ID' };
   }
+
+  const branch = currentBranch(env);
+  const map = localAccountMap(env);
+  if (branch && map[branch]) {
+    const { id, name } = map[branch];
+    return { id, name: name ? `${name} (branch ${branch})` : `from branch "${branch}"` };
+  }
+
   const result = wrangler(['whoami', '--json'], { env });
   if (result.status !== 0) {
     throw new Error(
@@ -92,8 +142,16 @@ export function resolveAccount(env = process.env) {
     throw new Error('Wrangler did not report any Cloudflare account for this login.');
   }
   const list = accounts.map((a) => `  ${a.name} — ${a.id}`).join('\n');
+  const branchHint = branch
+    ? `Pick the account for branch "${branch}" by adding it to ${LOCAL_ACCOUNTS_FILE}:\n` +
+      `  { "${branch}": { "id": "<account id>", "name": "<account name>" } }\n`
+    : '';
   throw new Error(
-    'Wrangler can see more than one Cloudflare account. Set CLOUDFLARE_ACCOUNT_ID to one of:\n' + list,
+    'Wrangler can see more than one Cloudflare account. Set CLOUDFLARE_ACCOUNT_ID to one of:\n' +
+      list +
+      '\n' +
+      branchHint +
+      'See `.cloudflare-accounts.example.json` for the file format.',
   );
 }
 

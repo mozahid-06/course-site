@@ -7,7 +7,7 @@ export interface CourseData { title: string; description: string; locked?: boole
 export interface AdminUser { id: number; email: string; is_admin: number; watched: number; owner: boolean; google: number; courses: string[] }
 export interface YoutubeLesson { id: string; course: string; folder: string; lesson: string; yt: string }
 export interface BulkResult { added: { email: string; password?: string }[]; skipped: { email: string; reason: string }[] }
-export interface Me { id: number; email: string; is_admin: number }
+export interface Me { id: number; email: string; is_admin: number; name?: string; ytKey?: string }
 export interface Comment {
   id: number; parent_id: number | null; body: string; created: number;
   name: string; initial: string; likes: number; liked: boolean; own: boolean; can_delete: boolean;
@@ -17,11 +17,19 @@ export interface DirEntry { name: string; path: string; position?: number | null
 export interface FileEntry { key: string; name: string; size: number; modified: number; lesson: boolean; hls: boolean; position?: number | null }
 export interface FileListing { path: string; dirs: DirEntry[]; files: FileEntry[]; order: Record<string, number> }
 export interface UploadPart { partNumber: number; etag: string; size?: number }
+export interface GoogleConfig { googleClientId: string; nonce?: string }
 
 /** A failed API call that still knows its HTTP status, which the uploader needs. */
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
+
+/**
+ * A JSON API call that gets no answer within this window is treated as failed, so a stalled
+ * server can never leave a screen blank forever. The server already deadlines its own DB
+ * queries well under this; the client timeout is the backstop for a network-level hang.
+ */
+const REQ_TIMEOUT_MS = 20000;
 
 @Injectable({ providedIn: 'root' })
 export class Api {
@@ -32,8 +40,8 @@ export class Api {
   readonly order = signal<Record<string, number>>({});
 
   /** Public config, fetched once. Kept so the login form does not wait on a second call. */
-  private configReq?: Promise<{ googleClientId: string }>;
-  private googleCfg?: { googleClientId: string };
+  private configReq?: Promise<GoogleConfig>;
+  private googleCfg?: GoogleConfig;
 
   /** Drop the local session after the server rejects it (another device signed in). */
   private signOutLocal(): void {
@@ -44,11 +52,28 @@ export class Api {
   }
 
   private async req<T>(path: string, body?: unknown, method?: string): Promise<T> {
-    const res = await fetch('/api/' + path, body === undefined && !method ? {} : {
-      method: method ?? 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch('/api/' + path, {
+        signal: ctrl.signal,
+        ...(body === undefined && !method ? {} : {
+          method: method ?? 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      });
+    } catch (e) {
+      // Our own deadline fired: report it like any other failed call so the caller can recover
+      // (the sign-in screen still renders, because /api/config does no database work).
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        throw new ApiError('The server is taking too long to respond. Please try again.', 0);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) this.signOutLocal();
     if (!res.ok) throw new ApiError(data.error || 'Request failed', res.status);
@@ -63,11 +88,28 @@ export class Api {
     return data as T;
   }
 
-  async init(): Promise<void> {
+  /**
+   * Resolves after the first session check, so the admin route guard can wait for
+   * `me` to be known instead of redirecting while it is still `undefined`.
+   */
+  private readyResolve?: () => void;
+  readonly ready = new Promise<void>((resolve) => { this.readyResolve = resolve; });
+  private initializing?: Promise<void>;
+
+  init(): Promise<void> {
+    // Bootstrap and the admin guard both call this; share the first run. A later
+    // call (right after sign-in) starts a fresh check so the session is re-read.
+    return (this.initializing ??= this.load().finally(() => {
+      this.initializing = undefined;
+      this.readyResolve?.();
+    }));
+  }
+
+  private async load(): Promise<void> {
     // Ask for the public config alongside the session check, so the login form already
     // has the Google client id the moment it mounts and its button can render with the
     // email/password fields instead of a moment later.
-    this.configReq ??= this.req<{ googleClientId: string }>('config').catch(() => ({ googleClientId: '' }));
+    this.configReq ??= this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
     try {
       this.me.set(await this.req<Me>('me'));
       this.courses.set(await this.req<CourseData[]>('course'));
@@ -88,13 +130,34 @@ export class Api {
     await this.init();
   }
 
-  /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
-  async googleClientId(): Promise<string> {
+  /**
+   * Google sign-in config from the server: the OAuth client id and the per-page sign-in
+   * nonce the callback must echo. Empty client id means Google sign-in is not configured.
+   */
+  async googleConfig(): Promise<GoogleConfig> {
     if (!this.googleCfg) {
-      this.configReq ??= this.req<{ googleClientId: string }>('config').catch(() => ({ googleClientId: '' }));
+      this.configReq ??= this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
       this.googleCfg = await this.configReq;
     }
-    return this.googleCfg.googleClientId;
+    return this.googleCfg;
+  }
+
+  /**
+   * Fetches the sign-in config again rather than reusing the cached copy, and returns it.
+   * The nonce has to match the `gn` cookie the browser holds at the moment Google is
+   * initialized: a form left open past the cookie's 12-hour life would otherwise present a
+   * nonce the server no longer accepts and the Google callback fails with no way to
+   * recover. The call is cheap — `/api/config` does no database work.
+   */
+  async freshGoogleConfig(): Promise<GoogleConfig> {
+    this.configReq = this.req<GoogleConfig>('config').catch(() => ({ googleClientId: '' }));
+    this.googleCfg = await this.configReq;
+    return this.googleCfg;
+  }
+
+  /** Google OAuth client id from the server; '' when Google sign-in is not configured. */
+  async googleClientId(): Promise<string> {
+    return (await this.googleConfig()).googleClientId;
   }
 
   async loginGoogle(credential: string): Promise<void> {
@@ -156,6 +219,19 @@ export class Api {
   getNotes(lesson: string): Promise<{ data: object[] }> { return this.req(`notes/${encodeURIComponent(lesson)}`); }
   saveNotes(lesson: string, data: object[]): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, { data }, 'PUT'); }
   clearNotes(lesson: string): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, undefined, 'DELETE'); }
+
+  /**
+   * Stores one image pasted into a PDF's notes and returns its private same-origin URL.
+   * The id is the browser-computed SHA-256 of the bytes, so storing the same image twice is
+   * idempotent. Raw bytes, not JSON: a pasted image is far larger than the notes row allows.
+   */
+  uploadNoteAsset(lesson: string, id: string, bytes: Uint8Array, type: string): Promise<{ url: string }> {
+    return this.raw(`note-asset/${encodeURIComponent(lesson)}/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': type },
+      body: bytes as unknown as BodyInit,
+    });
+  }
 
   // ---- Lesson discussion, private notes, resources (video lessons) ----
   private lessonPath(key: string, tail: string): string {

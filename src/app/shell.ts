@@ -1,47 +1,62 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, inject } from '@angular/core';
+import { NavigationEnd, Router } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map } from 'rxjs';
 import { Api } from './api';
 import { LessonSearch } from './lesson-search';
 
 /**
  * Cross-screen shell state that used to live in the header: which top-level panel
  * is open, whether a lesson is open, and the actions the shared options menu runs.
- * Keeping it here lets the header, the lesson bar and the admin panel reuse one menu.
+ * With the router in charge, both are derived from the current URL instead of
+ * being toggled by hand.
  */
 @Injectable({ providedIn: 'root' })
 export class Shell {
   private readonly api = inject(Api);
   private readonly search = inject(LessonSearch);
+  private readonly router = inject(Router);
+
+  /** Where "Back to course" returns to; remembered when the admin panel opens. */
+  private returnUrl = '/';
+
+  private readonly url = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects),
+    ),
+    { initialValue: this.router.url },
+  );
 
   /** The admin panel is open. */
-  readonly admin = signal(false);
-  /** A lesson is open in the course view. */
-  readonly lessonOpen = signal(false);
-
+  readonly admin = computed(() => this.url().startsWith('/admin'));
+  /** A lesson player is open (the header collapses). */
+  readonly lessonOpen = computed(() => /^\/course\/[^/]+\/lesson\//.test(this.url()));
   /** The slim header only exists on the course list and folder browser. */
   readonly headerVisible = computed(() => !this.admin() && !this.lessonOpen());
 
   toggleAdmin(): void {
     this.search.reset();
-    this.lessonOpen.set(false);
-    const closing = this.admin();
-    this.admin.update((v) => !v);
-    // The admin "Course files" sub-view is kept in the hash; drop it when the panel
-    // closes so returning to the course never leaves a stale #files behind.
-    if (closing && location.hash === '#files') history.pushState(null, '', location.pathname + location.search);
+    if (this.admin()) {
+      void this.router.navigateByUrl(this.returnUrl);
+      this.returnUrl = '/';
+    } else {
+      this.returnUrl = this.router.url || '/';
+      void this.router.navigateByUrl('/admin');
+    }
   }
 
   async signOut(): Promise<void> {
-    this.admin.set(false);
-    this.lessonOpen.set(false);
     this.search.reset();
     await this.api.logout();
+    void this.router.navigateByUrl('/');
   }
 
   /** Same local cleanup as signOut(), but ends every session for the account. */
   async signOutEverywhere(): Promise<void> {
-    this.admin.set(false);
-    this.lessonOpen.set(false);
     this.search.reset();
     await this.api.logoutEverywhere();
+    // admin/lessonOpen derive from the URL, so returning to the list clears them.
+    void this.router.navigateByUrl('/');
   }
 }

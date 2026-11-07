@@ -53,13 +53,18 @@ export class Login implements AfterViewInit {
     // mounts. Show the divider/button slot the moment we know sign-in is on, then drop
     // Google's button into it, so every option is on screen together and the centred form
     // never jumps. No fade: it appears at once.
-    const clientId = await this.api.googleClientId();
+    // Take a fresh nonce here instead of the cached one: it must match the `gn` cookie now,
+    // and a page that has been open for hours (or a second tab) would otherwise fail.
+    const { googleClientId: clientId, nonce } = await this.api.freshGoogleConfig();
     if (!clientId) return;
     this.hasGoogle.set(true);
     try {
       await loadGsi();
       google.accounts.id.initialize({
         client_id: clientId,
+        // Google echoes this in the ID token; the server checks it against the same-site
+        // cookie it issued with the config, so a token minted for another site is rejected.
+        nonce,
         ux_mode: 'popup',
         callback: (r: { credential: string }) => void this.google(r.credential),
       });
