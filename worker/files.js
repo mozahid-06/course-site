@@ -62,7 +62,7 @@ export function childDirsFromIds(parent, ids) {
     const slash = rest.indexOf('/');
     if (slash <= 0) continue; // a lesson directly in `parent`, not a folder
     const seg = rest.slice(0, slash);
-    if (seg === '_resources') continue;
+    if (seg === '_resources' || seg === '_notes') continue;
     out.add(parent ? parent + '/' + seg : seg);
   }
   return [...out];
@@ -88,7 +88,7 @@ async function siblings(env, parent) {
     for (const p of r.delimitedPrefixes || []) {
       const full = p.replace(/\/$/, '');
       const name = entryName(full);
-      if (!name || name === '_resources') continue;
+      if (!name || name === '_resources' || name === '_notes') continue;
       out.push({ path: full, name, rank: 0 });
       seen.add(full);
     }
@@ -137,8 +137,9 @@ async function listFolder(env, prefix) {
     const r = await env.RESOURCES.list({ prefix: base(prefix), delimiter: '/', cursor, limit: 1000 });
     for (const p of r.delimitedPrefixes || []) {
       const full = p.replace(/\/$/, '');
-      if (!full || full.split('/').pop() === '_resources') continue;
-      dirs.push({ name: full.split('/').pop(), path: full });
+      const last = full.split('/').pop();
+      if (!full || last === '_resources' || last === '_notes') continue;
+      dirs.push({ name: last, path: full });
     }
     for (const o of r.objects) {
       const name = o.key.slice(base(prefix).length);
@@ -280,6 +281,7 @@ const LESSON_ROWS = [
   'UPDATE comments SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE video_notes SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE pdf_notes SET lesson = ? WHERE lesson = ?',
+  'UPDATE OR REPLACE note_assets SET lesson = ? WHERE lesson = ?',
   'UPDATE OR REPLACE watched SET lesson = ? WHERE lesson = ?',
   'UPDATE resources SET lesson = ? WHERE lesson = ?',
   'UPDATE resources SET file_key = ? WHERE file_key = ?',
@@ -436,13 +438,14 @@ const LESSON_DELETES = [
   'DELETE FROM comments WHERE lesson = ?',
   'DELETE FROM video_notes WHERE lesson = ?',
   'DELETE FROM pdf_notes WHERE lesson = ?',
+  'DELETE FROM note_assets WHERE lesson = ?',
   'DELETE FROM watched WHERE lesson = ?',
   'DELETE FROM resources WHERE lesson = ?',
 ];
 
 // The rows can outlive the objects if a delete is interrupted between the two steps, so a
 // retry must find lesson keys in D1 as well as in the bucket. Table names are constants.
-const LESSON_TABLES = ['comments', 'video_notes', 'pdf_notes', 'watched', 'resources'];
+const LESSON_TABLES = ['comments', 'video_notes', 'pdf_notes', 'note_assets', 'watched', 'resources'];
 
 async function lessonKeysUnder(env, p, single) {
   if (single) return isLessonKey(p) ? [p] : [];
@@ -475,6 +478,13 @@ async function deleteEntry(env, rawPath, hooks) {
       if (!keys.includes(row.file_key)) keys.push(row.file_key);
       lessons.add(row.file_key);
     }
+  }
+  // Pasted note images live under `_notes/<user>/<asset>`, outside the lesson keys. Remember
+  // which ones these lessons reference so their R2 objects can be dropped after the rows go.
+  const assetRows = [];
+  for (const lessonKey of lessons) {
+    const rows = await env.DB.prepare('SELECT user_id, asset_id FROM note_assets WHERE lesson = ?').bind(lessonKey).all();
+    assetRows.push(...(rows.results || []));
   }
   // A folder that holds only YouTube lessons has no R2 keys and no student-data rows, so
   // the guard below would 404 it. Its `youtube_lessons` rows are the "something is here".
@@ -518,8 +528,20 @@ async function deleteEntry(env, rawPath, hooks) {
     return bad('The files are gone, but some records could not be cleaned up. Run the delete again to finish it. ' + (e && e.message ? e.message : e), 500);
   }
 
+  // The note_assets rows are gone now; drop the images no other lesson of that user still uses.
+  await dropNoteAssetObjects(env, assetRows).catch(() => {});
   hooks.invalidate();
   return json({ ok: true, deleted: keys.length, cleaned: lessons.size });
+}
+
+/** After note_assets rows are deleted, remove the R2 objects no other lesson still references. */
+async function dropNoteAssetObjects(env, rows) {
+  const keys = [];
+  for (const row of rows) {
+    const still = await env.DB.prepare('SELECT 1 x FROM note_assets WHERE user_id = ? AND asset_id = ? LIMIT 1').bind(row.user_id, row.asset_id).first();
+    if (!still) keys.push(`_notes/${row.user_id}/${row.asset_id}`);
+  }
+  if (keys.length) await env.RESOURCES.delete([...new Set(keys)]);
 }
 
 // ---- Folders ----

@@ -183,6 +183,19 @@ export class Api {
   saveNotes(lesson: string, data: object[]): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, { data }, 'PUT'); }
   clearNotes(lesson: string): Promise<unknown> { return this.req(`notes/${encodeURIComponent(lesson)}`, undefined, 'DELETE'); }
 
+  /**
+   * Stores one image pasted into a PDF's notes and returns its private same-origin URL.
+   * The id is the browser-computed SHA-256 of the bytes, so storing the same image twice is
+   * idempotent. Raw bytes, not JSON: a pasted image is far larger than the notes row allows.
+   */
+  uploadNoteAsset(lesson: string, id: string, bytes: Uint8Array, type: string): Promise<{ url: string }> {
+    return this.raw(`note-asset/${encodeURIComponent(lesson)}/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': type },
+      body: bytes as unknown as BodyInit,
+    });
+  }
+
   // ---- Lesson discussion, private notes, resources (video lessons) ----
   private lessonPath(key: string, tail: string): string {
     return `lesson/${encodeURIComponent(key)}/${tail}`;

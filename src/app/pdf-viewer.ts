@@ -132,6 +132,62 @@ export class PdfViewer {
     });
   }
 
+  // A pasted image is serialized by PDF.js as a full-resolution base64 data URL. That is both
+  // too large for the notes row (D1 caps a row at 2 MB) and blocked by the page CSP when the
+  // viewer fetches it back on reload. So each image is uploaded once to R2, content-addressed
+  // by its SHA-256, and the note keeps the short same-origin URL instead. This map means the
+  // same bytes are uploaded once no matter how many times the notes are saved in a session.
+  private readonly assetByDataUrl = new Map<string, Promise<string>>();
+
+  /** Split a `data:` URL into its bytes and media type without using fetch (CSP blocks data:). */
+  private static dataUrlBytes(dataUrl: string): { bytes: Uint8Array; type: string } | null {
+    const comma = dataUrl.indexOf(',');
+    if (!dataUrl.startsWith('data:') || comma < 0) return null;
+    const header = dataUrl.slice(5, comma);
+    const type = header.split(';')[0] || 'application/octet-stream';
+    const payload = dataUrl.slice(comma + 1);
+    if (/;base64/i.test(header)) {
+      const bin = atob(payload);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return { bytes, type };
+    }
+    // A non-base64 data URL (raw SVG markup) is percent-encoded text.
+    try { return { bytes: new TextEncoder().encode(decodeURIComponent(payload)), type }; }
+    catch { return null; }
+  }
+
+  /** The stored URL for one image, uploading it on first use. */
+  private assetUrl(dataUrl: string): Promise<string> {
+    let pending = this.assetByDataUrl.get(dataUrl);
+    if (!pending) {
+      pending = (async () => {
+        const parsed = PdfViewer.dataUrlBytes(dataUrl);
+        if (!parsed) return dataUrl; // not an image we can decode: leave it untouched
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', parsed.bytes as unknown as BufferSource));
+        const id = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
+        return (await this.api.uploadNoteAsset(this.key(), id, parsed.bytes, parsed.type)).url;
+      })();
+      this.assetByDataUrl.set(dataUrl, pending);
+      // A failed upload must not poison the cache: retry on the next save.
+      pending.catch(() => this.assetByDataUrl.delete(dataUrl));
+    }
+    return pending;
+  }
+
+  /** Replace every pasted-image data URL in a notes payload with its stored R2 URL. */
+  private async withAssets(notes: object[]): Promise<object[]> {
+    const out: object[] = [];
+    for (const note of notes) {
+      const rec = note as Record<string, unknown>;
+      const bitmapUrl = rec['bitmapUrl'];
+      if (typeof bitmapUrl !== 'string' || !bitmapUrl.startsWith('data:')) { out.push(note); continue; }
+      try { out.push({ ...rec, bitmapUrl: await this.assetUrl(bitmapUrl) }); }
+      catch { out.push(note); } // keep the original: an unsaved image beats a lost one
+    }
+    return out;
+  }
+
   private async apply(notes: object[]): Promise<void> {
     this.applying = true;
     try { for (const n of notes) await this.pdf.addEditorAnnotation(n as Note); }
@@ -160,7 +216,7 @@ export class PdfViewer {
     this.hidden.set(false);
     this.status.set('');
     try {
-      this.saved = (await this.api.getNotes(key)).data ?? [];
+      this.saved = await this.withAssets((await this.api.getNotes(key)).data ?? []);
     } catch {
       if (key === this.key()) this.status.set('Could not load your notes');
     }
@@ -224,7 +280,7 @@ export class PdfViewer {
     this.timer = undefined;
     if (this.loadedKey !== this.key()) return;
     let notes: object[];
-    try { notes = this.payload(); } catch { return; }
+    try { notes = await this.withAssets(this.payload()); } catch { return; }
     if (JSON.stringify(notes) === JSON.stringify(this.saved)) return;
     this.status.set('Saving…');
     try { await this.api.saveNotes(this.key(), notes); this.saved = notes; this.status.set('Saved'); }

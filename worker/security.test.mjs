@@ -21,6 +21,7 @@ const FILES = {
   'Course/clip.mp4': new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]),
   'Course/big.mp4': new Uint8Array(5 * 1024 * 1024),
   'Course/paced.pdf': new Uint8Array(520000), // just over a 5-second burst at 0.8 Mbps
+  'Course/deleteme.pdf': '%PDF-1.4\nThrowaway lesson', // lesson delete removes its note images
   'Other/hidden.pdf': '%PDF-1.4\nOther course',
 };
 
@@ -383,4 +384,130 @@ test('sign out everywhere ends every session for the account', async () => {
   const out = await call('/api/logout/all', { method: 'POST', headers: { cookie, origin: ORIGIN } });
   assert.equal(out.status, 200);
   assert.equal((await call('/api/me', { headers: { cookie } })).status, 401, 'the old cookie is dead');
+});
+
+// ---- PDF note images: stored in R2, referenced from the notes JSON by URL ----
+
+const assetId = (n) => n.toString(16).padStart(64, '0'); // the client sends a sha-256 hex id
+const assetPath = (lesson, id) => '/api/note-asset/' + encodeURIComponent(lesson) + '/' + id;
+const uploadAsset = (cookie, lesson, id, body, type = 'image/png') =>
+  call(assetPath(lesson, id), { method: 'PUT', headers: { ...browser(cookie), 'content-type': type }, body });
+
+test('note images are served back only to their owner, and the type/size are checked', async () => {
+  const a = await addUser();
+  await enroll(a, 'Course');
+  const { cookie: ca } = await login(a);
+  const b = await addUser();
+  await enroll(b, 'Course');
+  const { cookie: cb } = await login(b);
+
+  const id = assetId(1);
+  const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const put = await uploadAsset(ca, 'Course/notes.pdf', id, png);
+  assert.equal(put.status, 200);
+  assert.equal((await put.json()).url, assetPath('Course/notes.pdf', id));
+
+  // The owner reads the exact bytes back with the stored type.
+  const got = await call(assetPath('Course/notes.pdf', id), { headers: browser(ca) });
+  assert.equal(got.status, 200);
+  assert.equal(got.headers.get('content-type'), 'image/png');
+  assert.deepEqual(new Uint8Array(await got.arrayBuffer()), png);
+
+  // Another student's key prefix does not contain it.
+  assert.equal((await call(assetPath('Course/notes.pdf', id), { headers: browser(cb) })).status, 404);
+
+  // A non-image content type is refused, as is an oversized body.
+  assert.equal((await uploadAsset(ca, 'Course/notes.pdf', assetId(2), png, 'text/html')).status, 415);
+  assert.equal((await uploadAsset(ca, 'Course/notes.pdf', assetId(3), new Uint8Array(17 * 1024 * 1024))).status, 413);
+
+  // A malformed id is a plain 400, not a 500.
+  assert.equal((await uploadAsset(ca, 'Course/notes.pdf', 'not-a-hash', png)).status, 400);
+});
+
+test('a student cannot store an image for a course they are not in', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  assert.equal((await uploadAsset(cookie, 'Other/hidden.pdf', assetId(4), new Uint8Array([1]))).status, 403);
+});
+
+test('saving notes keeps only the images they reference; deleting notes removes them', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const lesson = 'Course/notes.pdf';
+  const id1 = assetId(11);
+  const id2 = assetId(12);
+  assert.equal((await uploadAsset(cookie, lesson, id1, new Uint8Array([7]))).status, 200);
+  assert.equal((await uploadAsset(cookie, lesson, id2, new Uint8Array([9]))).status, 200);
+
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id1}`), true);
+
+  // Save notes that reference only id1: id2 is pruned from R2 and D1.
+  const notes = [{ annotationType: 13, pageIndex: 0, bitmapUrl: assetPath(lesson, id1) }];
+  const save = await call('/api/notes/' + encodeURIComponent(lesson), {
+    method: 'PUT', headers: { ...browser(cookie), 'content-type': 'application/json' }, body: JSON.stringify({ data: notes }),
+  });
+  assert.equal(save.status, 200);
+  assert.deepEqual(raw.prepare('SELECT asset_id FROM note_assets WHERE user_id = ?').all(uid).map((r) => r.asset_id), [id1]);
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id2}`), false, 'the unreferenced image left R2');
+  assert.equal((await call(assetPath(lesson, id1), { headers: browser(cookie) })).status, 200, 'the referenced image stays');
+
+  // Deleting the notes takes the last image with it.
+  assert.equal((await call('/api/notes/' + encodeURIComponent(lesson), { method: 'DELETE', headers: browser(cookie) })).status, 200);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM note_assets WHERE user_id = ?').get(uid).n, 0);
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id1}`), false);
+});
+
+test('the reserved _notes prefix never shows up as a course or a file folder', async () => {
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  assert.equal((await uploadAsset(cookie, 'Course/notes.pdf', assetId(21), new Uint8Array([1]))).status, 200);
+
+  invalidateCourse(); // rebuild the cached course tree now that _notes/... exists
+  const courses = await (await call('/api/course', { headers: browser(cookie) })).json();
+  assert.ok(!courses.some((c) => c.title === '_notes'), 'no _notes course appears');
+
+  const admin = await addUser({ admin: true });
+  const { cookie: ca } = await login(admin, { ip: '10.9.9.9' });
+  const listing = await (await call('/api/admin/files?prefix=', { headers: browser(ca) })).json();
+  assert.ok(!listing.dirs.some((d) => d.name === '_notes'), 'no _notes folder in the admin file list');
+});
+
+test('deleting a user removes their note images from R2', async () => {
+  const admin = await addUser({ admin: true });
+  const { cookie: ca } = await login(admin, { ip: '10.9.9.8' });
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const id = assetId(31);
+  assert.equal((await uploadAsset(cookie, 'Course/notes.pdf', id, new Uint8Array([1]))).status, 200);
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), true);
+
+  const del = await call('/api/admin/users/' + uid, { method: 'DELETE', headers: { cookie: ca, origin: ORIGIN } });
+  assert.equal(del.status, 200);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM note_assets WHERE user_id = ?').get(uid).n, 0);
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), false);
+});
+
+test('deleting a lesson removes the note images attached to it', async () => {
+  const admin = await addUser({ admin: true });
+  const { cookie: ca } = await login(admin, { ip: '10.9.9.7' });
+  const email = await addUser();
+  await enroll(email, 'Course');
+  const { cookie } = await login(email);
+  const id = assetId(41);
+  assert.equal((await uploadAsset(cookie, 'Course/deleteme.pdf', id, new Uint8Array([1]))).status, 200);
+  const uid = raw.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), true);
+
+  const res = await call('/api/admin/files/delete', {
+    method: 'POST', headers: { ...browser(ca), 'content-type': 'application/json' }, body: JSON.stringify({ path: 'Course/deleteme.pdf' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(env.RESOURCES.has(`_notes/${uid}/${id}`), false);
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM note_assets WHERE lesson = ?').get('Course/deleteme.pdf').n, 0);
 });

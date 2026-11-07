@@ -72,6 +72,13 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, pass TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, sid TEXT)',
   'CREATE TABLE IF NOT EXISTS watched (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, PRIMARY KEY (user_id, lesson))',
   'CREATE TABLE IF NOT EXISTS pdf_notes (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (user_id, lesson))',
+  // Images pasted into a PDF are far too big for a D1 row (2 MB hard cap), so only the bytes
+  // go to R2, under a private `_notes/<user>/<sha256>` key; this table remembers which assets
+  // a student's per-lesson notes reference, and their content type, so they can be served
+  // back and swept when the notes, the lesson or the student go away.
+  'CREATE TABLE IF NOT EXISTS note_assets (user_id INTEGER NOT NULL, lesson TEXT NOT NULL, asset_id TEXT NOT NULL, type TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (user_id, lesson, asset_id))',
+  'CREATE INDEX IF NOT EXISTS idx_note_assets_lesson ON note_assets(lesson)',
+  'CREATE INDEX IF NOT EXISTS idx_note_assets_user ON note_assets(user_id, asset_id)',
   'CREATE TABLE IF NOT EXISTS attempts (k TEXT PRIMARY KEY, n INTEGER NOT NULL, t INTEGER NOT NULL)',
   // Distinct lessons a student opened in one hour bucket. In D1 so every Worker instance
   // shares the count; a row is written only when a lesson is new for that hour.
@@ -233,6 +240,7 @@ async function listCourse(env) {
   // files directly under course root go into section '' (no section)
   const courses = new Map();
   for (const key of keys) {
+    if (key === '_notes' || key.startsWith('_notes/')) continue; // reserved: private note images
     // A course is a top-level folder. Register it for any nested key, so a folder that
     // holds only its `.keep` placeholder (a brand-new, empty course) is listed too.
     const slash = key.indexOf('/');
@@ -488,6 +496,56 @@ function paceBody(env, u, body) {
   });
 }
 
+// ---- PDF note images (stored in R2, referenced from the notes JSON by URL) ----
+const NOTE_ASSET_MAX = 16 * 1024 * 1024; // one image; above this the browser must not inline it
+const NOTE_ASSETS_PER_USER = 500; // a generous ceiling so one account cannot fill the bucket
+// Exactly the image types PDF.js accepts for a stamp; anything else is refused.
+const NOTE_ASSET_TYPES = new Set(['image/apng', 'image/avif', 'image/bmp', 'image/gif', 'image/jpeg', 'image/png', 'image/svg+xml', 'image/webp', 'image/x-icon']);
+const ASSET_ID_RE = /^[a-f0-9]{64}$/; // sha-256 hex, computed by the browser
+const noteAssetKey = (userId, assetId) => `_notes/${userId}/${assetId}`;
+const noteAssetUrl = (lesson, assetId) => `/api/note-asset/${encodeURIComponent(lesson)}/${assetId}`;
+
+/** The asset ids a notes payload references, read from each note's bitmapUrl. */
+function referencedAssetIds(notes) {
+  const ids = new Set();
+  for (const note of notes) {
+    const url = note && typeof note === 'object' ? note.bitmapUrl : null;
+    if (typeof url !== 'string') continue;
+    const last = url.split('?')[0].split('#')[0].split('/').pop() || '';
+    if (ASSET_ID_RE.test(last)) ids.add(last);
+  }
+  return ids;
+}
+
+/**
+ * Delete note_assets rows for (user, lesson) that `keep` does not name, then remove the R2
+ * object of each dropped asset that no other lesson of that user still needs. With no keep,
+ * every asset for that lesson is dropped (notes deleted, or the lesson deleted).
+ */
+async function pruneNoteAssets(env, userId, lesson, keep = new Set()) {
+  const rows = (await env.DB.prepare('SELECT asset_id FROM note_assets WHERE user_id = ? AND lesson = ?').bind(userId, lesson).all()).results || [];
+  const drop = rows.map((r) => String(r.asset_id)).filter((id) => !keep.has(id));
+  if (!drop.length) return;
+  await env.DB.batch(drop.map((id) => env.DB.prepare('DELETE FROM note_assets WHERE user_id = ? AND lesson = ? AND asset_id = ?').bind(userId, lesson, id)));
+  const keys = [];
+  for (const id of drop) {
+    const still = await env.DB.prepare('SELECT 1 x FROM note_assets WHERE user_id = ? AND asset_id = ? LIMIT 1').bind(userId, id).first();
+    if (!still) keys.push(noteAssetKey(userId, id));
+  }
+  if (keys.length) await env.RESOURCES.delete([...new Set(keys)]);
+}
+
+/** Remove every R2 object under a prefix (a deleted user's `_notes/<id>/` folder). */
+async function sweepPrefix(env, prefix) {
+  let cursor;
+  do {
+    const r = await env.RESOURCES.list({ prefix, cursor, limit: 1000 });
+    const keys = (r.objects || []).map((o) => o.key);
+    if (keys.length) await env.RESOURCES.delete(keys);
+    cursor = r.truncated ? r.cursor : undefined;
+  } while (cursor);
+}
+
 async function serve(req, env, key, u) {
   const isPdf = /\.pdf$/i.test(key);
   const ok = /\.(m3u8|ts|pdf|mp4|webm|mkv|mov|avi|m4v|vtt)$/i.test(key);
@@ -679,6 +737,54 @@ const handle = async (req, env) => {
         if (mine && !mine.has(courseOf(key))) return json({ error: 'Not allowed' }, 403);
         return serve(req, env, key, u);
       }
+      if (path.startsWith('/api/note-asset/')) {
+        // Private images pasted into a PDF's notes. The bytes live in R2 under this user's
+        // `_notes/` prefix and only the signed-in student may read or write their own.
+        const rest = path.slice('/api/note-asset/'.length);
+        const cut = rest.lastIndexOf('/');
+        const lesson = cut > 0 ? decodeURIComponent(rest.slice(0, cut)) : '';
+        const assetId = cut > 0 ? rest.slice(cut + 1) : '';
+        if (!ASSET_ID_RE.test(assetId)) return json({ error: 'Bad request' }, 400);
+        if (lesson.length > 500 || !/\.pdf$/i.test(lesson)) return json({ error: 'Bad lesson' }, 400);
+        const mineA = await myCourses(env, u);
+        if (mineA && !mineA.has(courseOf(lesson))) return json({ error: 'Not allowed' }, 403);
+        const realA = await env.DB.prepare('SELECT 1 x FROM resources WHERE file_key = ?').bind(lesson).first();
+        if (!realA && (await lessonAccess(env, u, lesson)) !== 'ok') return json({ error: 'Not found' }, 404);
+        if (m === 'PUT') {
+          const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+          if (!NOTE_ASSET_TYPES.has(type)) return json({ error: 'That is not an image we can store' }, 415);
+          const body = new Uint8Array(await req.arrayBuffer());
+          if (!body.length) return json({ error: 'Empty image' }, 400);
+          if (body.length > NOTE_ASSET_MAX) return json({ error: 'That image is too large to store' }, 413);
+          const exists = await env.DB.prepare('SELECT 1 x FROM note_assets WHERE user_id = ? AND asset_id = ? LIMIT 1').bind(u.id, assetId).first();
+          if (!exists) {
+            const n = await env.DB.prepare('SELECT COUNT(*) n FROM note_assets WHERE user_id = ?').bind(u.id).first();
+            if (n && Number(n.n) >= NOTE_ASSETS_PER_USER) return json({ error: 'You have too many stored images on this PDF' }, 413);
+          }
+          await env.RESOURCES.put(noteAssetKey(u.id, assetId), body, { httpMetadata: { contentType: type } });
+          await env.DB.prepare(
+            'INSERT INTO note_assets (user_id, lesson, asset_id, type, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, lesson, asset_id) DO UPDATE SET type = excluded.type',
+          ).bind(u.id, lesson, assetId, type, Date.now()).run();
+          return json({ url: noteAssetUrl(lesson, assetId) });
+        }
+        if (m === 'GET') {
+          const row = await env.DB.prepare('SELECT type FROM note_assets WHERE user_id = ? AND lesson = ? AND asset_id = ?').bind(u.id, lesson, assetId).first();
+          if (!row) return json({ error: 'Not found' }, 404);
+          const obj = await env.RESOURCES.get(noteAssetKey(u.id, assetId));
+          if (!obj) return json({ error: 'Not found' }, 404);
+          return new Response(obj.body, {
+            status: 200,
+            headers: {
+              'content-type': row.type || 'application/octet-stream',
+              'x-content-type-options': 'nosniff',
+              // An image is data, never a document: sandbox it in case an SVG slips through.
+              'content-security-policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+              'cache-control': 'private, max-age=31536000, immutable',
+            },
+          });
+        }
+        return json({ error: 'Not found' }, 404);
+      }
       if (path.startsWith('/api/notes/')) {
         // Private PDF notes: every query is scoped to the signed-in user, so nobody can read another student's notes.
         const lesson = decodeURIComponent(path.slice(11));
@@ -703,10 +809,13 @@ const handle = async (req, env) => {
           if (enc.encode(text).length > 1500000) return json({ error: 'Your notes on this PDF are too large to save' }, 413);
           if (!data.length) await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
           else await env.DB.prepare('INSERT INTO pdf_notes (user_id, lesson, data, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, lesson) DO UPDATE SET data = excluded.data, updated = excluded.updated').bind(u.id, lesson, text, Date.now()).run();
+          // An image the student removed (or replaced) no longer belongs in the bucket.
+          await pruneNoteAssets(env, u.id, lesson, referencedAssetIds(data));
           return json({ ok: true });
         }
         if (m === 'DELETE') {
           await env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ? AND lesson = ?').bind(u.id, lesson).run();
+          await pruneNoteAssets(env, u.id, lesson);
           return json({ ok: true });
         }
       }
@@ -1016,6 +1125,7 @@ const handle = async (req, env) => {
             await env.DB.batch([
               env.DB.prepare('DELETE FROM watched WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM pdf_notes WHERE user_id = ?').bind(id),
+              env.DB.prepare('DELETE FROM note_assets WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM video_notes WHERE user_id = ?').bind(id),
               // Their top-level comments take other students' replies with them, the same
               // way deleting a comment does, so no invisible orphan replies are left behind.
@@ -1027,6 +1137,8 @@ const handle = async (req, env) => {
               env.DB.prepare('DELETE FROM enrollments WHERE user_id = ?').bind(id),
               env.DB.prepare('DELETE FROM users WHERE id = ?').bind(id),
             ]);
+            // Their pasted note images live under `_notes/<id>/`; take the folder with them.
+            await sweepPrefix(env, `_notes/${id}/`).catch(() => {});
             return json({ ok: true });
           }
         }

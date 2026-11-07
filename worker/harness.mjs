@@ -33,16 +33,30 @@ function readRange(range) {
  * It implements the two methods the Worker uses: `list` (paged) and `get` (with ranges).
  */
 export function r2(files = {}) {
-  const map = new Map(Object.entries(files).map(([key, value]) => [key, typeof value === 'string' ? enc.encode(value) : value]));
+  const toBytes = (v) => (typeof v === 'string' ? enc.encode(v) : v instanceof Uint8Array ? v : new Uint8Array(v));
+  const map = new Map();
+  const meta = new Map();
+  for (const [key, value] of Object.entries(files)) map.set(key, toBytes(value));
   return {
-    async list({ cursor, limit = 1000 } = {}) {
-      const keys = [...map.keys()].sort();
-      const start = cursor ? keys.indexOf(cursor) + 1 : 0;
-      const page = keys.slice(start, start + limit);
+    async list({ prefix = '', delimiter, cursor, limit = 1000 } = {}) {
+      const objects = [];
+      const prefixes = new Set();
+      for (const key of [...map.keys()].sort()) {
+        if (!key.startsWith(prefix)) continue;
+        if (delimiter) {
+          const rest = key.slice(prefix.length);
+          const at = rest.indexOf(delimiter);
+          if (at >= 0) { prefixes.add(prefix + rest.slice(0, at + delimiter.length)); continue; }
+        }
+        objects.push({ key, size: map.get(key).length });
+      }
+      const start = cursor ? objects.findIndex((o) => o.key === cursor) + 1 : 0;
+      const page = objects.slice(start, start + limit);
       return {
-        objects: page.map((key) => ({ key, size: map.get(key).length })),
-        truncated: start + limit < keys.length,
-        cursor: page.at(-1),
+        objects: page,
+        delimitedPrefixes: [...prefixes].sort(),
+        truncated: start + limit < objects.length,
+        cursor: page.at(-1)?.key,
       };
     },
     async get(key, { range } = {}) {
@@ -50,7 +64,8 @@ export function r2(files = {}) {
       const bytes = map.get(key);
       const total = bytes.length;
       const spec = readRange(range);
-      if (!spec) return { body: bytes, size: total };
+      const httpMetadata = meta.get(key);
+      if (!spec) return { body: bytes, size: total, httpMetadata };
       let offset = 0;
       let length = total;
       if (spec.suffix != null) {
@@ -60,8 +75,21 @@ export function r2(files = {}) {
         offset = Math.min(spec.offset, total);
         length = Math.max(0, Math.min(spec.length, total - offset));
       }
-      return { body: bytes.subarray(offset, offset + length), size: total, range: { offset, length } };
+      return { body: bytes.subarray(offset, offset + length), size: total, range: { offset, length }, httpMetadata };
     },
+    async head(key) {
+      if (!map.has(key)) return null;
+      return { key, size: map.get(key).length, httpMetadata: meta.get(key) };
+    },
+    async put(key, value, opts = {}) {
+      map.set(key, toBytes(value));
+      if (opts.httpMetadata) meta.set(key, opts.httpMetadata);
+    },
+    async delete(keys) {
+      for (const k of Array.isArray(keys) ? keys : [keys]) { map.delete(k); meta.delete(k); }
+    },
+    // Test-only helper: the Worker never calls this, but tests assert an object really left.
+    has: (key) => map.has(key),
   };
 }
 
